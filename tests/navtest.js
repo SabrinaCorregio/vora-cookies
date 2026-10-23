@@ -1,0 +1,22 @@
+const fs = require('fs');
+const src = fs.readFileSync(require('path').join(__dirname, '..', 'js', 'app.js'), 'utf8');
+global.localStorage = (() => { const s = {}; return { getItem: k => (k in s ? s[k] : null), setItem: (k, v) => { s[k] = v; } }; })();
+global.setTimeout = () => 0; global.clearTimeout = () => {};
+global.document = { getElementById: () => ({ innerHTML: '', querySelector: () => null, contains: () => false }), querySelector: () => null, activeElement: null, addEventListener: () => {} };
+global.window = { __VORA_TEST: {}, __VORA_DEFAULTS: require('./defaults.cjs') };
+eval(src);
+const api = window.__VORA_TEST.api, { ui, a } = api; api.Cloud.mode = 'local'; api.setDb(api.demoData());
+let fails = 0; const check = (c, m) => { if (!c) { fails++; console.log('FAIL:', m); } else console.log('ok  :', m); };
+const count = h => (h.match(/data-screen="ajustes"/g) || []).length;
+const res = {};
+for (const s of ['hoje', 'nova', 'vendas', 'historico', 'fechar', 'clientes', 'relatorios', 'conferir']) { ui.screen = s; ui.sheet = null; res[s] = count(api.build()); }
+console.log('acessos a Ajustes por tela:', JSON.stringify(res));
+check(res.hoje === 1 && Object.keys(res).filter(k => k !== 'hoje').every(k => res[k] === 0), 'só a tela Hoje tem acesso a Ajustes, e é um só (o botão do topo)');
+ui.screen = 'hoje'; let h = api.build();
+check(/aria-label="Ajustes" data-act="go" data-screen="ajustes"/.test(h), 'o acesso é o botão de controles do topo');
+a.openProd(); check(count(api.build()) === 1, 'janela de produção aberta: nenhum atalho novo para Ajustes');
+a.closeSheet({ classList: { contains: () => false }, getAttribute: () => null }, {});
+ui.screen = 'ajustes'; h = api.build();
+check(h.includes('Sabores e preços') && h.includes('+ Adicionar sabor') && h.includes('Ativo') && h.includes('data-in="flPrice"') && h.includes('data-in="flName"'), 'Ajustes mantém: sabores, preços, adicionar sabor e ativar/desativar');
+check(h.includes('Mensagem de agradecimento') && h.includes('Pix e cobrança'), 'Ajustes mantém as mensagens e o Pix');
+console.log(fails ? 'FALHAS ' + fails : 'TODOS OS TESTES DE ACESSO PASSARAM');

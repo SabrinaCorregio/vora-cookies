@@ -1,0 +1,13 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Só as contas listadas aqui podem ler e gravar. Troque pelos e-mails (em minúsculas).
+    function permitido() {
+      return request.auth != null
+        && request.auth.token.email in ['SEU_EMAIL@exemplo.com', 'EMAIL_DA_SABRINA@exemplo.com'];
+    }
+    match /{document=**} {
+      allow read, write: if permitido();
+    }
+  }
+}

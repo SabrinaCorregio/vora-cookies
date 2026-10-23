@@ -1,0 +1,9 @@
+{
+  "name": "vora-cookies",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Controle de vendas e pagamentos da Vora Cookies (app instalável)",
+  "scripts": {
+    "test": "node tests/run-all.cjs"
+  }
+}
