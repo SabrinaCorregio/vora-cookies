@@ -270,6 +270,37 @@ var OLD_ORDER_TEMPLATE = 'Oi, {nome}! Segue o seu pedido na Vora Cookies:\n\n{it
 var ORDER_TEMPLATE = 'Oi, {nome}! Segue o seu pedido na Vora Cookies:\n\n{itens}\n\n{pendencias}Total: {total}\n\nPara pagar, use o Pix (chave celular):\n{pix}\n\nDepois é só enviar o comprovante por aqui. Qualquer dúvida, é só chamar!';
 var OLD_TEMPLATE = 'Oi, {nome}! Agradecemos por comprar na Vora Cookies. Esperamos que você goste muito! Se puder, conta pra gente o que achou: {link}';
 var NEW_TEMPLATE = 'Oi, {nome}! Agradecemos por comprar na Vora Cookies. Esperamos que você goste muito! Se puder, conta pra gente o que achou: {link}\n\nSiga a gente no Instagram: @voracookies (https://instagram.com/voracookies)';
+/* ---------- Financeiro (caixa da empresa) ---------- */
+var FIN_DEFAULT = {
+  startDate: '', startCents: 0, reserve: 0,
+  cats: [
+    { id: 'c-insumos', name: 'Ingredientes e insumos', kind: 'variavel', active: true },
+    { id: 'c-embal', name: 'Embalagens', kind: 'variavel', active: true },
+    { id: 'c-entrega', name: 'Entregas e frete', kind: 'variavel', active: true },
+    { id: 'c-taxas', name: 'Taxas (Pix, cartão, iFood)', kind: 'variavel', active: true },
+    { id: 'c-mkt', name: 'Marketing e divulgação', kind: 'variavel', active: true },
+    { id: 'c-energia', name: 'Gás, energia e água', kind: 'fixo', active: true },
+    { id: 'c-aluguel', name: 'Aluguel e condomínio', kind: 'fixo', active: true },
+    { id: 'c-impostos', name: 'Impostos (DAS/MEI)', kind: 'fixo', active: true },
+    { id: 'c-equip', name: 'Equipamentos e utensílios', kind: 'investimento', active: true },
+    { id: 'c-retirada', name: 'Retirada do sócio (pró-labore)', kind: 'retirada', active: true },
+    { id: 'c-outros', name: 'Outros', kind: 'variavel', active: true }
+  ]
+};
+var KIND_NAMES = { fixo: 'Custo fixo', variavel: 'Custo variável', investimento: 'Investimento', retirada: 'Retirada' };
+var INC_CATS = ['Aporte do sócio', 'Reembolso', 'Outras receitas'];
+
+/* ---------- Encomendas (congelados) ---------- */
+var FROZEN_DEFAULT = [
+  { id: 'f-brownbutter', name: 'Brown Butter', resale: 1200, pack: { 6: 4920, 12: 9480, 24: 18240 }, active: true },
+  { id: 'f-nutella', name: 'Nutella', resale: 1590, pack: { 6: 6480, 12: 12240, 24: 23040 }, active: true },
+  { id: 'f-doceleite', name: 'Doce de Leite', resale: 1590, pack: { 6: 6480, 12: 12240, 24: 23040 }, active: true },
+  { id: 'f-triplo', name: 'Triplo Chocolate', resale: 1590, pack: { 6: 6480, 12: 12240, 24: 23040 }, active: true },
+  { id: 'f-redvelvet', name: 'Red Velvet', resale: 2200, pack: { 6: 7320, 12: 13800, 24: 25920 }, active: true },
+  { id: 'f-kinder', name: 'Kinder Bueno', resale: 2590, pack: { 6: 10500, 12: 20280, 24: 39120 }, active: true }
+];
+var ENC_TEMPLATE = 'Oi, {nome}! Segue o resumo da sua encomenda na Vora Cookies:\n\n{itens}\n\n{entrega}\n\nTotal: {total}\n\nPara confirmar o pedido, envie o sinal de 50% ({sinal}) ou o pagamento total ({total}) por Pix (chave celular):\n{pix}\n\nDepois é só enviar o comprovante por aqui. Confira se os itens e a data de entrega estão certos e me avise se algo precisar mudar. A encomenda fica reservada depois do pagamento do sinal.';
+
 function defaults() {
   return {
     v: 1,
@@ -288,10 +319,15 @@ function defaults() {
       pixPayload: PIX_PAYLOAD,
       orderTemplate: ORDER_TEMPLATE,
       upg1: true,
-      upg2: true
+      upg2: true,
+      frozen: JSON.parse(JSON.stringify(FROZEN_DEFAULT)),
+      encTemplate: ENC_TEMPLATE,
+      finCfg: JSON.parse(JSON.stringify(FIN_DEFAULT))
     },
     customers: [],
     sales: [],
+    orders: [],
+    fin: [],
     days: {}
   };
 }
@@ -319,6 +355,8 @@ function migrate(d) {
   d.settings.upg1 = upg; d.settings.upg2 = upg2;
   d.customers = Array.isArray(d.customers) ? d.customers : [];
   d.sales = Array.isArray(d.sales) ? d.sales : [];
+  d.orders = Array.isArray(d.orders) ? d.orders : [];
+  d.fin = Array.isArray(d.fin) ? d.fin : [];
   d.days = d.days && typeof d.days === 'object' ? d.days : {};
   return d;
 }
@@ -344,6 +382,7 @@ Store.saveCloud = function (d) { try { localStorage.setItem(KEY_CLOUD, JSON.stri
 
 var db = Store.hasCloud() ? Store.loadCloud() : Store.load();
 upgradeSettings(db);
+if (typeof window !== 'undefined' && window.__VORA_PREVIEW) { try { if (localStorage.getItem('vora.preview.ver') !== String(window.__VORA_PREVIEW)) { db = demoData(); Store.save(db); localStorage.setItem('vora.preview.ver', String(window.__VORA_PREVIEW)); } } catch (e) {} }
 
 /* ---------- consultas ---------- */
 function flv(id) { for (var i = 0; i < db.flavors.length; i++) if (db.flavors[i].id === id) return db.flavors[i]; return null; }
@@ -460,6 +499,39 @@ function demoData() {
     d.days[date] = { produced: produced };
     if (!isToday) d.days[date].closed = { at: '18:30', leftover: 12, note: '' };
   });
+  function mk(fid, size, qty) { var f = frozenOf(d, fid); return { fid: f.id, name: f.name, size: size, qty: qty, unit: f.pack[size] }; }
+  function frozenOf(dd, id) { var r = null; (dd.settings.frozen || []).forEach(function (x) { if (x.id === id) r = x; }); return r; }
+  function cu(name) { return cust[name] ? cust[name].id : null; }
+  d.orders.push(
+    { id: uid() + 'o1', customerId: cu('Patrícia Dias'), name: 'Patrícia Dias', date: addDays(t, -2), time: '10:20', createdAt: addDays(t, -2) + ' 10:20', deliveryDate: addDays(t, 1), delivery: true, feeCents: 1500,
+      lines: [mk('f-nutella', 12, 2), mk('f-redvelvet', 6, 1)], notes: 'Evento da empresa', payments: [{ at: addDays(t, -2) + ' 11:05', cents: 16650, method: 'Pix', kind: 'sinal' }], delivered: false, thank: null, reqAt: '10:25' },
+    { id: uid() + 'o2', customerId: cu('Carlos Lima'), name: 'Carlos Lima', date: t, time: '09:10', createdAt: t + ' 09:10', deliveryDate: addDays(t, 3), delivery: false, feeCents: 0,
+      lines: [mk('f-kinder', 6, 2), mk('f-brownbutter', 24, 1)], notes: '', payments: [{ at: t + ' 09:30', cents: 19620, method: 'Pix', kind: 'sinal' }], delivered: false, thank: null, reqAt: '09:12' },
+    { id: uid() + 'o3', customerId: cu('Fernanda Costa'), name: 'Fernanda Costa', date: addDays(t, -5), time: '14:00', createdAt: addDays(t, -5) + ' 14:00', deliveryDate: t, delivery: false, feeCents: 0,
+      lines: [mk('f-triplo', 24, 1), mk('f-doceleite', 12, 1)], notes: '', payments: [{ at: addDays(t, -5) + ' 14:30', cents: 17640, method: 'Pix', kind: 'sinal' }, { at: t + ' 08:40', cents: 17640, method: 'Pix', kind: 'saldo' }],
+      delivered: true, deliveredDate: t, deliveredTime: '08:40', thank: 'pending', reqAt: '14:05' },
+    { id: uid() + 'o4', customerId: cu('Gabriel Santos'), name: 'Gabriel Santos', date: addDays(t, -9), time: '16:00', createdAt: addDays(t, -9) + ' 16:00', deliveryDate: addDays(t, -6), delivery: false, feeCents: 0,
+      lines: [mk('f-nutella', 6, 3)], notes: '', payments: [{ at: addDays(t, -9) + ' 16:20', cents: 19440, method: 'Pix', kind: 'total' }],
+      delivered: true, deliveredDate: addDays(t, -6), deliveredTime: '11:00', thank: 'sent', thankAt: '11:10' },
+    { id: uid() + 'o5', customerId: cu('Larissa Melo'), name: 'Larissa Melo', date: t, time: '11:40', createdAt: t + ' 11:40', deliveryDate: addDays(t, 6), delivery: false, feeCents: 0,
+      lines: [mk('f-redvelvet', 12, 1)], notes: 'Aniversário', payments: [], delivered: false, thank: null }
+  );
+  var fcfg = d.settings.finCfg; fcfg.startDate = addDays(t, -13); fcfg.startCents = 400000; fcfg.reserve = 80000;
+  function fe(ago, cat, desc, cents, sup, method) { d.fin.push({ id: uid() + 'g' + d.fin.length, type: 'out', origin: 'gasto', desc: desc, cat: cat, cents: cents, date: addDays(t, -ago), supplier: sup || '', method: method || 'Pix', notes: '', paid: true, paidDate: addDays(t, -ago), paidCents: cents, createdAt: addDays(t, -ago) + ' 10:00' }); }
+  function bl(due, cat, desc, cents, sup, recur, paidAgo) {
+    var e = { id: uid() + 'c' + d.fin.length, type: 'out', origin: 'conta', desc: desc, cat: cat, cents: cents, date: addDays(t, due), supplier: sup || '', method: 'Pix', notes: '', paid: false, recur: recur || '', createdAt: addDays(t, -14) + ' 09:00' };
+    if (paidAgo != null) { e.paid = true; e.paidDate = addDays(t, -paidAgo); e.paidCents = cents; e.paidMethod = 'Pix'; }
+    d.fin.push(e);
+  }
+  fe(12, 'c-insumos', 'Chocolate, farinha e manteiga', 52000, 'Atacadão'); fe(11, 'c-equip', 'Batedeira planetária', 89000, 'Loja do Chef', 'Cartão');
+  fe(9, 'c-embal', 'Caixas e sacos', 28000, 'Embalagens Sul'); fe(8, 'c-mkt', 'Anúncio no Instagram', 9000, 'Meta', 'Cartão');
+  fe(7, 'c-retirada', 'Pró-labore', 120000, ''); fe(6, 'c-insumos', 'Nutella e leite condensado', 61000, 'Mercado');
+  fe(4, 'c-entrega', 'Entregas (motoboy)', 8500, 'Motoboy', 'Dinheiro'); fe(3, 'c-taxas', 'Taxas do iFood', 6430, 'iFood'); fe(1, 'c-insumos', 'Ovos e açúcar', 21500, 'Mercado');
+  bl(-9, 'c-aluguel', 'Aluguel do espaço', 90000, 'Imobiliária Centro', 'mensal', 9); bl(21, 'c-aluguel', 'Aluguel do espaço', 90000, 'Imobiliária Centro', 'mensal');
+  bl(-12, 'c-energia', 'Energia e água', 21000, 'Concessionária', 'mensal', 12); bl(9, 'c-energia', 'Energia e água', 21000, 'Concessionária', 'mensal');
+  bl(3, 'c-impostos', 'DAS do MEI', 7590, 'Receita Federal', 'mensal'); bl(-2, 'c-outros', 'Internet', 9990, 'Provedor', 'mensal');
+  bl(18, 'c-embal', 'Embalagens (a prazo)', 24000, 'Embalagens Sul', '');
+  d.fin.push({ id: uid() + 'e1', type: 'in', origin: 'entrada', desc: 'Reembolso de frete', cat: 'Reembolso', cents: 12000, date: addDays(t, -5), supplier: 'Motoboy', method: 'Pix', notes: '', paid: true, paidDate: addDays(t, -5), createdAt: addDays(t, -5) + ' 12:00' });
   return d;
 }
 
@@ -471,7 +543,7 @@ var LOGO = (typeof window !== 'undefined' && window.__VORA_LOGO) || '';
 function freshNova() { return { query: '', customerId: null, phone: '', items: {}, paidNow: true, method: 'Pix', wa: true, inclPend: true }; }
 var ui = {
   screen: 'hoje', sheet: null, vFilter: 'todas', hDay: today(), rPeriod: '7d', rFrom: addDays(today(), -13), rTo: today(),
-  rDay: null, nova: freshNova(), cliQuery: '', toast: null, closeNote: '', backup: '', importText: '', cliFocus: null, login: { email: '', pass: '' }, conf: { text: '', res: null, images: [], pix: [], busy: null }
+  rDay: null, nova: freshNova(), cliQuery: '', toast: null, closeNote: '', backup: '', importText: '', cliFocus: null, eFilter: 'abertas', enc: freshEnc(), fTab: 'geral', fPeriod: 'mes', fFrom: '', fTo: '', fCat: '', fHor: 30, fSim: { amount: '', date: '' }, ff: null, login: { email: '', pass: '' }, conf: { text: '', res: null, images: [], pix: [], busy: null }
 };
 
 var P = {
@@ -484,14 +556,26 @@ var P = {
   back: '<path d="M15 5l-7 7 7 7"/>',
   sliders: '<path d="M4 6h8M18 6h2M4 12h2M12 12h8M4 18h10M20 18h0"/><circle cx="15" cy="6" r="2.2"/><circle cx="9" cy="12" r="2.2"/><circle cx="17" cy="18" r="2.2"/>',
   userplus: '<circle cx="10" cy="8" r="3.5"/><path d="M3 20c0-3.6 3-6 7-6M18 9v6M15 12h6"/>',
-  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>'
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  box: '<path d="M3 7.5L12 3l9 4.5v9L12 21l-9-4.5v-9z"/><path d="M3 7.5l9 4.5 9-4.5M12 12v9"/>',
+  wallet: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 14.5h2"/>'
 };
 function ic(n, size, sw) {
   return '<svg width="' + (size || 24) + '" height="' + (size || 24) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="' + (sw || 2) + '" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + P[n] + '</svg>';
 }
-var NAV = [['hoje', 'Hoje', 'home'], ['vendas', 'Vendas', 'list'], ['historico', 'Histórico', 'cal'], ['clientes', 'Clientes', 'users'], ['relatorios', 'Relatórios', 'chart']];
+var NAV = [['hoje', 'Hoje', 'home'], ['vendas', 'Vendas', 'list'], ['encomendas', 'Encomendas', 'box'], ['historico', 'Histórico', 'cal'], ['clientes', 'Clientes', 'users'], ['relatorios', 'Relatórios', 'chart'], ['financeiro', 'Financeiro', 'wallet']];
+var PC_ONLY = { relatorios: 1, financeiro: 1, finprint: 1 };
+/* celular = aparelho com a lado menor da tela menor que 600 px (vale também de lado). Relatórios só abre em computador ou tablet. */
+function isPhone() { try { return typeof screen !== 'undefined' && Math.min(screen.width, screen.height) < 600; } catch (e) { return false; } }
+function navItems() { return NAV.filter(function (n) { return !(PC_ONLY[n[0]] && isPhone()); }); }
+function viewSoComputador(title) {
+  return topSimple(title || 'Relatórios', 'hoje') + '<div class="scroll"><div class="card col" style="padding:18px"><div class="bold" style="font-size:16px">Disponível só no computador ou no tablet</div>' +
+    '<div class="small muted" style="line-height:1.5">Para ver faturamento, recebido, encomendas e o financeiro da empresa, abra o app no computador ou no tablet.</div>' +
+    '<button type="button" class="btn btn-primary btn-block" data-act="go" data-screen="hoje">Voltar para Hoje</button></div></div>';
+}
 function navHtml() {
-  return '<nav class="nav"><img class="side-logo" src="' + LOGO + '" alt="Vora Cookies">' + NAV.map(function (n) {
+  var items = navItems();
+  return '<nav class="nav" style="grid-template-columns:repeat(' + items.length + ',minmax(0,1fr))"><img class="side-logo" src="' + LOGO + '" alt="Vora Cookies">' + items.map(function (n) {
     return '<button type="button" class="' + (ui.screen === n[0] ? 'on' : '') + '" data-act="go" data-screen="' + n[0] + '">' + ic(n[2]) + n[1] + '</button>';
   }).join('') + '</nav>';
 }
@@ -505,6 +589,73 @@ function dueOf(s) {
   return { extras: ex, extraC: ec, total: s ? s.cents + ec : 0 };
 }
 function saleById(id) { for (var i = 0; i < db.sales.length; i++) if (db.sales[i].id === id) return db.sales[i]; return null; }
+/* ---------- encomendas: consultas e cálculos ---------- */
+var PACK_SIZES = [6, 12, 24];
+function orderById(id) { for (var i = 0; i < db.orders.length; i++) if (db.orders[i].id === id) return db.orders[i]; return null; }
+function orderAsSale(o) { return { id: o.id, customerId: o.customerId, name: o.name, date: o.deliveredDate || o.date, time: o.deliveredTime || '', thank: o.thank, thankAt: o.thankAt, isOrder: true }; }
+function itemById(id) { var s = saleById(id); if (s) return s; var o = orderById(id); return o ? orderAsSale(o) : null; }
+function thankItems(kind) {
+  var s = db.sales.filter(function (x) { return kind === 'pending' ? (x.paid && x.thank === 'pending') : x.thank === 'sent'; });
+  var o = db.orders.filter(function (x) { return kind === 'pending' ? (x.delivered && x.thank === 'pending') : x.thank === 'sent'; }).map(orderAsSale);
+  return s.concat(o);
+}
+function thankLabel(g) {
+  var n = g.sales.length, last = g.sales[0];
+  var allOrd = g.sales.every(function (x) { return x.isOrder; }), noOrd = g.sales.every(function (x) { return !x.isOrder; });
+  var when = esc(shortDay(last.date)) + (last.time ? ' ' + esc(last.time) : '');
+  if (noOrd) return n === 1 ? 'comprou ' + when : n + ' compras · última ' + when;
+  if (allOrd) return n === 1 ? 'encomenda entregue ' + when : n + ' encomendas · última ' + when;
+  return n + ' pedidos · último ' + when;
+}
+function frozenById(id) { var l = db.settings.frozen || []; for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; return null; }
+function packPrice(f, size) { return (f && f.pack && f.pack[size]) || 0; }
+function lineCents(l) { return (l.qty || 0) * (l.unit || 0); }
+function orderItemsCents(o) { return (o.lines || []).reduce(function (a, l) { return a + lineCents(l); }, 0); }
+function orderTotal(o) { return orderItemsCents(o) + (o.feeCents || 0); }
+function orderPaid(o) { return (o.payments || []).reduce(function (a, p) { return a + (p.cents || 0); }, 0); }
+function orderRemaining(o) { return Math.max(0, orderTotal(o) - orderPaid(o)); }
+function sinalOf(total) { return Math.round(total / 2); }
+function orderPayState(o) { var t = orderTotal(o), p = orderPaid(o); return (t > 0 && p >= t) ? 'total' : (p > 0 ? 'parcial' : 'pendente'); }
+function epayAmount(o, kind) { var rem = orderRemaining(o); return kind === 'sinal' ? Math.min(sinalOf(orderTotal(o)), rem) : rem; }
+function dmyFull(date) { var p = String(date || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : ''; }
+function relDay(date) {
+  if (!date) return '';
+  var t = today();
+  if (date === t) return 'hoje';
+  if (date === addDays(t, 1)) return 'amanhã';
+  if (date < t) { var n = Math.round((pdate(t) - pdate(date)) / 86400000); return 'atrasada ' + n + (n === 1 ? ' dia' : ' dias'); }
+  return '';
+}
+function lineText(l) { return l.qty + '× ' + l.name + ' (' + l.size + ' un)'; }
+function encDeliveryText(o) {
+  var when = 'Data de entrega: ' + dmyFull(o.deliveryDate) + (o.deliveryDate ? ' (' + WD[pdate(o.deliveryDate).getDay()].toLowerCase() + ')' : '');
+  if (!o.delivery) return when + '\nRetirada no local.';
+  if (o.feeCents > 0) return when + '\nEntrega no endereço: taxa de ' + money(o.feeCents) + ' (já incluída no total).';
+  return when + '\nEntrega no endereço: vamos confirmar o valor da entrega com você.';
+}
+function encText(o) {
+  var total = orderTotal(o);
+  var lines = (o.lines || []).map(function (l) { return '• ' + l.qty + 'x ' + l.name + ' (pacote de ' + l.size + ' un) — ' + money(lineCents(l)); }).join('\n');
+  return String(db.settings.encTemplate || '').split('{nome}').join(firstName(o.name)).split('{itens}').join(lines)
+    .split('{entrega}').join(encDeliveryText(o)).split('{total}').join(money(total)).split('{sinal}').join(money(sinalOf(total)))
+    .split('{pix}').join(db.settings.pixKey || '').trim();
+}
+function freshEnc() { return { editId: null, query: '', customerId: null, phone: '', items: {}, units: {}, names: {}, delivery: false, fee: '', date: '', notes: '' }; }
+function encLines(e) {
+  var out = [], k, idx = {};
+  for (k in e.items) {
+    var q = e.items[k] || 0; if (q <= 0) continue;
+    var p = k.split('|'), fid = p[0], sz = +p[1], f = frozenById(fid);
+    out.push({ fid: fid, name: f ? f.name : ((e.names && e.names[k]) || 'Sabor'), size: sz, qty: q, unit: (e.units && e.units[k]) || packPrice(f, sz) });
+  }
+  (db.settings.frozen || []).forEach(function (f, i) { idx[f.id] = i; });
+  out.sort(function (x, y) { return ((idx[x.fid] == null ? 99 : idx[x.fid]) - (idx[y.fid] == null ? 99 : idx[y.fid])) || (x.size - y.size); });
+  return out;
+}
+function encDraft(e) {
+  var cust = e.customerId ? customerById(e.customerId) : null;
+  return { name: cust ? cust.name : e.query.trim(), lines: encLines(e), delivery: !!e.delivery, feeCents: e.delivery ? parseMoney(e.fee) : 0, deliveryDate: e.date };
+}
 
 function saleCard(s) {
   var paid = s.paid, due = dueOf(s), ph = custPhone(s);
@@ -566,8 +717,8 @@ function viewHoje() {
     '<div class="track"><i style="width:' + pct + '%"></i></div>' +
     '<div class="l" style="margin-top:8px">' + pct + '% dos cookies de hoje já foram vendidos</div></div>';
   body += '<div class="grid2">' +
-    '<div class="stat"><div class="t">Recebido</div><div class="v" style="color:var(--green)">' + money(st.paidC) + '</div>' +
-    '<div class="small muted" style="margin-top:2px">' + (st.n - st.pendN) + ' vendas pagas</div></div>' +
+    '<div class="stat"><div class="t">Recebido</div><div class="v" style="color:var(--green)">' + money(cashOn(t).cents) + '</div>' +
+    '<div class="small muted" style="margin-top:2px">' + (st.n - st.pendN) + ' vendas pagas' + (cashOn(t).ordN ? '<br>+ ' + money(cashOn(t).ordC) + ' de encomendas' : '') + '</div></div>' +
     '<button type="button" class="stat warn" data-act="goReceber"><div class="t">A receber</div><div class="v" style="color:var(--warn-ink)">' + money(st.pendC) + '</div>' +
     '<div class="small bold" style="margin-top:2px;color:var(--warn-ink)">' + st.pendN + (st.pendN === 1 ? ' venda' : ' vendas') + ' · ver quais →</div></button></div>';
   if (prev.length) {
@@ -751,12 +902,13 @@ function viewHistorico() {
     }).join('') + '</div></div>' +
       '<div><div class="label">Para quem foi · sem pagamento primeiro</div><div class="cards">' + orderSales(list).map(saleCard).join('') + '</div></div>';
   }
+  body += encDayCard(sel, 'Encomendas neste dia');
   return top + ban + strip + '<div class="scroll" style="padding-top:14px">' + body + '</div>';
 }
 
 /* ---------- FECHAR CAIXA ---------- */
 function viewFechar() {
-  var t = today(), prod = producedOf(t), sold = soldMap(t), st = stats(t), day = db.days[t] || {}, closed = day.closed;
+  var t = today(), prod = producedOf(t), sold = soldMap(t), st = stats(t), day = db.days[t] || {}, closed = day.closed, cash = cashOn(t);
   var rows = db.flavors.filter(function (f) { return prod[f.id] > 0 || sold[f.id] > 0; });
   var made = 0, k; for (k in prod) made += prod[k] || 0;
   var left = Math.max(0, made - st.cookies), allSold = made > 0 && left === 0;
@@ -776,11 +928,13 @@ function viewFechar() {
     body += '<label class="field" style="margin-top:10px"><span>Destino das sobras (opcional)</span><input class="inp" id="obs" type="text" placeholder="Ex.: guardei para amanhã" value="' + esc(ui.closeNote) + '" data-in="closeNote"></label>';
   }
   body += '</div>';
-  var methods = PAYS.map(function (m) { return '<div class="row between" style="min-height:40px;border-bottom:1px solid var(--line2)"><span style="font-weight:600">' + m + '</span><span class="bold">' + money(st.byMethod[m] || 0) + '</span></div>'; }).join('');
+  var methods = PAYS.map(function (m) { return '<div class="row between" style="min-height:40px;border-bottom:1px solid var(--line2)"><span style="font-weight:600">' + m + '</span><span class="bold">' + money(cash.byMethod[m] || 0) + '</span></div>'; }).join('');
   body += '<div class="card"><div class="bold" style="font-size:14px;margin-bottom:4px">2. Conferir os pagamentos</div>' + methods +
-    '<div class="row between bold" style="min-height:44px;color:var(--green)"><span>Total recebido</span><span>' + money(st.paidC) + '</span></div>' +
+    '<div class="row between bold" style="min-height:44px;color:var(--green)"><span>Total recebido</span><span>' + money(cash.cents) + '</span></div>' +
+    (cash.ordN ? '<div class="small muted" style="margin:-4px 0 6px">Inclui ' + money(cash.ordC) + ' de encomendas (sinais e saldos).</div>' : '') +
     '<div class="alert row between" style="padding:10px 12px;border:0"><div><div class="bold" style="font-size:13px">A receber · ' + money(st.pendC) + '</div><div class="small" style="font-weight:500">' + st.pendN + (st.pendN === 1 ? ' venda ainda sem pagamento' : ' vendas ainda sem pagamento') + '</div></div>' +
     (st.pendN ? '<button type="button" class="btn btn-warn btn-sm" data-act="goReceber">Ver pendências</button>' : '') + '</div></div></div>';
+  body += encDayCard(t, '3. Encomendas');
   var foot = closed
     ? '<div style="padding:12px var(--px) 18px"><div class="small muted" style="text-align:center;margin-bottom:8px">Caixa fechado às ' + esc(closed.at) + '</div><button type="button" class="btn btn-outline btn-lg btn-block" data-act="fecharReopen">Reabrir caixa</button></div>'
     : '<div style="padding:12px var(--px) 18px"><button type="button" class="btn btn-primary btn-lg btn-block" data-act="fecharConfirm">Fechar caixa de hoje</button><div class="small muted" style="text-align:center;margin-top:8px">As vendas a receber continuam abertas nos próximos dias.</div></div>';
@@ -801,12 +955,12 @@ function viewClientes() {
   var q = norm(ui.cliQuery);
   var byRecent = function (a, b) { return (a.date + a.time) < (b.date + b.time) ? 1 : -1; };
   var focus = ui.cliFocus || [];
-  var queue = thankGroups(db.sales.filter(function (s) { return s.paid && s.thank === 'pending'; }).sort(byRecent));
+  var queue = thankGroups(thankItems('pending').sort(byRecent));
   queue.sort(function (x, y) {
     var fx = x.sales.some(function (s) { return focus.indexOf(s.id) >= 0; }) ? 0 : 1, fy = y.sales.some(function (s) { return focus.indexOf(s.id) >= 0; }) ? 0 : 1;
     return fx - fy;
   });
-  var sent = thankGroups(db.sales.filter(function (s) { return s.thank === 'sent'; }).sort(byRecent)).slice(0, 5);
+  var sent = thankGroups(thankItems('sent').sort(byRecent)).slice(0, 5);
   var cl = db.customers.filter(function (c) { return !q || norm(c.name).indexOf(q) >= 0 || digits(c.phone).indexOf(digits(ui.cliQuery)) >= 0 && digits(ui.cliQuery).length > 2; })
     .sort(function (a, b) { return a.name.localeCompare(b.name, 'pt-BR'); });
   var top = '<div class="topbar"><h1>Clientes</h1><button type="button" class="iconbtn solid" aria-label="Cadastrar cliente" data-act="cliNew">' + ic('userplus', 24, 2.2) + '</button></div>';
@@ -818,7 +972,7 @@ function viewClientes() {
   body += '<div><div class="label">Para agradecer · ' + queue.length + '</div><div class="cards">' + (queue.length ? queue.map(function (g) {
     var last = g.sales[0], n = g.sales.length, ids = g.sales.map(function (x) { return x.id; }).join(','), foc = g.sales.some(function (x) { return focus.indexOf(x.id) >= 0; });
     return '<div class="crow' + (foc ? ' focus' : '') + '"><div class="avatar">' + esc(initials(g.name)) + '</div><div style="flex:1;min-width:0"><div class="bold" style="font-size:14px">' + esc(g.name) + '</div>' +
-      '<div class="small muted">' + esc(g.phone || 'sem celular') + ' · ' + (n === 1 ? 'comprou ' + esc(shortDay(last.date)) + ' ' + esc(last.time || '') : n + ' compras · última ' + esc(shortDay(last.date)) + ' ' + esc(last.time || '')) + '</div></div>' +
+      '<div class="small muted">' + esc(g.phone || 'sem celular') + ' · ' + thankLabel(g) + '</div></div>' +
       (g.phone ? '<a class="btn btn-green btn-sm" href="' + esc(waLink(g.phone, thankText(g.name))) + '" target="_blank" rel="noopener" data-act="thanked" data-id="' + ids + '">' + ic('arrow', 16, 2.2) + 'WhatsApp</a>'
                : '<button type="button" class="btn btn-ghost btn-sm" data-act="cliOpen" data-cid="' + (g.cid || '') + '">Add celular</button>') + '</div>';
   }).join('') : '<div class="empty" style="padding:12px 0">Ninguém aguardando agradecimento.</div>') + '</div></div>';
@@ -858,6 +1012,7 @@ function viewRelatorios() {
     var k; for (k in s.items) { fm[k] = (fm[k] || 0) + s.items[k]; if (ui.rDay === s.date) fmDay[k] = (fmDay[k] || 0) + s.items[k]; }
   });
   if (ui.rDay && !set[ui.rDay]) ui.rDay = null;
+  var rep = reportOrders(r, set);
   var scope = ui.rDay ? fmDay : fm, rows = flavorRowsOf(scope), total = rows.reduce(function (a, x) { return a + x.qty; }, 0);
   var periods = [['hoje', 'Hoje'], ['7d', '7 dias'], ['mes', 'Mês'], ['outro', 'Outro']];
   var label = r.from === r.to ? longDay(r.from) : longDay(r.from) + ' a ' + longDay(r.to);
@@ -869,8 +1024,11 @@ function viewRelatorios() {
       '<label class="field"><span>Até</span><input class="box" type="date" value="' + esc(ui.rTo) + '" data-ch="rTo"></label></div>';
   }
   body += '<div class="grid2" style="grid-template-columns:minmax(0,1.2fr) minmax(0,1fr)"><div class="hero" style="padding:14px 16px"><div class="l" style="margin:0">Cookies vendidos</div><div class="n" style="font-size:44px;line-height:1.1">' + cookies + '</div></div>' +
-    '<div class="cards"><div class="mini"><div class="t">Faturamento</div><div class="v" style="font-size:18px">' + money(cents) + '</div></div>' +
-    '<div class="mini"><div class="t">A receber</div><div class="v" style="font-size:18px;color:var(--warn-ink)">' + money(pendC) + '</div></div></div></div>';
+    '<div class="cards"><div class="mini"><div class="t">Faturamento</div><div class="v" style="font-size:18px">' + money(cents + rep.delC) + '</div>' +
+    (rep.delN ? '<div class="tiny muted" style="margin-top:2px">Cookies ' + money(cents) + ' · encomendas ' + money(rep.delC) + '</div>' : '') + '</div>' +
+    '<div class="mini ok"><div class="t">Recebido</div><div class="v" style="font-size:18px;color:var(--green)">' + money(rep.cash) + '</div>' +
+    (rep.ordCash ? '<div class="tiny muted" style="margin-top:2px">Inclui ' + money(rep.ordCash) + ' de encomendas</div>' : '') + '</div>' +
+    '<div class="mini"><div class="t">A receber</div><div class="v" style="font-size:18px;color:var(--warn-ink)">' + money(pendC + rep.delRem) + '</div></div></div></div>';
   var chartHtml = '';
   if (r.days.length > 1) {
     var max = 1; r.days.forEach(function (d) { if ((per[d] || 0) > max) max = per[d]; });
@@ -885,6 +1043,7 @@ function viewRelatorios() {
     (ui.rDay ? '<button type="button" class="btn btn-ghost btn-sm" style="margin:6px 0 4px" data-act="repAll">Ver período todo</button>' : '') +
     '<div style="margin-top:10px">' + flavorBars(rows, total) + '</div></div>';
   body += chartHtml ? '<div class="split wl">' + chartHtml + flHtml + '</div>' : flHtml;
+  body += ordRepCard(rep);
   return top + '<div class="scroll" style="padding-top:14px">' + body + '</div>';
 }
 
@@ -932,6 +1091,8 @@ function viewAjustes() {
     '<label class="field"><span>Código do QR Pix (copia e cola, sem valor)</span><textarea class="box" id="pixpay" data-in="pixPayload" style="min-height:96px;font-size:16px;word-break:break-all">' + esc(db.settings.pixPayload) + '</textarea></label>' +
     '<div id="pixok" class="small bold">' + pixOkText() + '</div>' +
     '<div class="small muted" style="line-height:1.45">É o código do QR que aparece na tela de pagamento. Para trocar de conta, gere no app do banco um QR sem valor, copie o "Pix copia e cola" e cole aqui. O app coloca o valor de cada venda sozinho.</div></div>';
+  if (!isPhone()) body += finAjustesCard();
+  body += encAjustesCard();
   body += '<div class="card col"><div class="bold" style="font-size:14px">Mensagem de agradecimento (WhatsApp)</div>' +
     '<textarea class="box" id="tpl" data-in="tpl" aria-label="Mensagem de agradecimento">' + esc(db.settings.template) + '</textarea>' +
     '<div class="small muted">Use <b>{nome}</b> para o primeiro nome do cliente e <b>{link}</b> para o link de avaliação.</div>' +
@@ -953,6 +1114,7 @@ function sheetHtml() {
   var h = '';
   var s = sh.sid ? saleById(sh.sid) : null;
   var due = s ? dueOf(s) : { extras: [], extraC: 0, total: 0 };
+  var ord = sh.oid ? orderById(sh.oid) : null;
   if (sh.type === 'prod') {
     var t = today(), sold = soldMap(t), total = 0, k;
     var fl = activeFlavors().concat(db.flavors.filter(function (f) { return !f.active && (sold[f.id] > 0 || sh.draft[f.id] > 0); }));
@@ -1030,8 +1192,31 @@ function sheetHtml() {
     }
     h += '<div class="two" style="margin-top:18px"><button type="button" class="btn btn-outline btn-lg" style="min-height:52px;font-size:15px" data-act="closeSheet">Cancelar</button><button type="button" class="btn btn-primary btn-lg" style="min-height:52px;font-size:15px" data-act="cliSave">Salvar</button></div>' +
       (c ? '<button type="button" class="btn btn-outline btn-block" style="margin-top:10px" data-act="cliVenda" data-cid="' + c.id + '">Nova venda para ' + esc(c.name.split(' ')[0]) + '</button>' : '');
+  } else if (sh.type === 'epay1' && ord) {
+    var etot = orderTotal(ord), epaid = orderPaid(ord), erem = orderRemaining(ord);
+    var eopts = epaid === 0 ? [['sinal', 'Sinal 50% · ' + money(epayAmount(ord, 'sinal'))], ['total', 'Pagamento total · ' + money(erem)]] : [['saldo', 'Saldo restante · ' + money(erem)]];
+    h = '<div class="small bold muted">Passo 1 de 2</div><h2>Registrar pagamento</h2><div style="font-size:14px"><b>' + esc(custName(ord)) + '</b> · total ' + money(etot) + (epaid > 0 ? ' · já recebido ' + money(epaid) : '') + '</div>' +
+      '<div class="label" style="margin:16px 0 8px">O que o cliente pagou?</div><div class="row wrap">' + eopts.map(function (x) {
+        return '<button type="button" class="pill' + (sh.kind === x[0] ? ' on' : '') + '" data-act="ePayKind" data-k="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>' +
+      '<div class="label" style="margin:16px 0 8px">Como foi pago?</div><div class="row wrap">' + PAYS.map(function (m) { return '<button type="button" class="pill' + (sh.method === m ? ' on' : '') + '" data-act="payMethod" data-m="' + m + '">' + m + '</button>'; }).join('') + '</div>' +
+      '<div class="two" style="margin-top:22px"><button type="button" class="btn btn-outline btn-lg" style="min-height:52px;font-size:15px" data-act="closeSheet">Cancelar</button><button type="button" class="btn btn-primary btn-lg" style="min-height:52px;font-size:15px" data-act="ePayNext">Continuar</button></div>';
+  } else if (sh.type === 'epay2' && ord) {
+    var ecents = epayAmount(ord, sh.kind);
+    h = '<div class="small bold muted">Passo 2 de 2</div><h2>Confirme o recebimento</h2><div class="big ok"><div class="n">' + money(ecents) + '</div><div style="font-size:14px;font-weight:600;margin-top:6px">' + esc(custName(ord)) + ' · ' + esc(sh.method) + '</div>' +
+      '<div class="small" style="margin-top:2px">' + (sh.kind === 'sinal' ? 'Sinal de 50%' : (sh.kind === 'saldo' ? 'Saldo restante' : 'Pagamento total')) + ' da encomenda de ' + esc(dmyFull(ord.deliveryDate)) + '</div></div>' +
+      '<div style="font-size:14px;line-height:1.45;margin-top:14px">Você realmente recebeu esse valor? Depois você ainda pode desfazer.</div>' +
+      '<div class="two"><button type="button" class="btn btn-outline btn-lg" style="min-height:52px;font-size:15px" data-act="ePayBack">Voltar</button><button type="button" class="btn btn-green btn-lg" style="min-height:52px;font-size:15px" data-act="ePayConfirm">Sim, recebi</button></div>';
+  } else if (sh.type === 'eqr' && ord) {
+    var qtot = orderTotal(ord), qrem = orderRemaining(ord);
+    var qkinds = orderPaid(ord) === 0 ? [['sinal', 'Sinal 50% · ' + money(epayAmount(ord, 'sinal'))], ['total', 'Total · ' + money(qtot)]] : [['saldo', 'Saldo · ' + money(qrem)]];
+    var qkind = sh.kind || qkinds[0][0], qcents = epayAmount(ord, qkind), qpay = pixPayloadFor(db.settings.pixPayload, qcents), qsv = qpay ? qrSvg(qpay) : '';
+    h = '<h2 style="text-align:center">Pagar com Pix</h2>' + (qkinds.length === 1 ? '<div class="small bold muted" style="text-align:center;margin-bottom:6px">' + qkinds[0][1].split(' · ')[0] + ' da encomenda</div>' : '') + (qkinds.length > 1 ? '<div class="row wrap" style="justify-content:center;margin-bottom:8px">' + qkinds.map(function (x) { return '<button type="button" class="pill' + (qkind === x[0] ? ' on' : '') + '" data-act="eQrKind" data-k="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>' : '') +
+      (qsv ? '<div class="qrbox" style="width:min(330px,100%);margin:6px auto 0">' + qsv + '</div>' : '<div class="empty">QR do Pix indisponível. Confira o código do QR em Ajustes.</div>') +
+      '<div class="num" style="font-size:36px;text-align:center;margin-top:10px">' + money(qcents) + '</div><div class="small muted" style="text-align:center">' + esc(custName(ord)) + '</div>' +
+      '<div class="small muted" style="text-align:center;margin-top:4px">Recebedor: ' + esc(pixReceiver(db.settings.pixPayload)) + '</div>' +
+      '<button type="button" class="btn btn-outline btn-lg btn-block" style="margin-top:16px;min-height:52px;font-size:15px" data-act="closeSheet">Fechar</button>';
   } else if (sh.type === 'thanks') {
-    var tsales = (sh.sids || []).map(saleById).filter(Boolean), tseen = {}, tnames = [];
+    var tsales = (sh.sids || []).map(itemById).filter(Boolean), tseen = {}, tnames = [];
     tsales.forEach(function (x) { var k = x.customerId || x.name; if (!tseen[k]) { tseen[k] = 1; tnames.push(firstName(custName(x))); } });
     var one = tnames.length === 1;
     h = '<div class="small bold" style="color:var(--green)">' + esc(sh.head || 'Pagamento registrado ✓') + '</div>' +
@@ -1051,6 +1236,43 @@ function sheetHtml() {
   } else if (sh.type === 'migrate') {
     h = '<h2>Enviar dados para a nuvem?</h2><div style="font-size:14px;line-height:1.45">Encontramos neste aparelho dados que ainda não estão na nuvem: <b>' + sh.nC + (sh.nC === 1 ? ' cliente' : ' clientes') + '</b>, <b>' + sh.nS + (sh.nS === 1 ? ' venda' : ' vendas') + '</b> e <b>' + sh.nD + (sh.nD === 1 ? ' dia' : ' dias') + '</b> de produção. Eles passam a aparecer em todos os aparelhos com acesso.</div>' +
       '<div class="two"><button type="button" class="btn btn-outline btn-lg" style="min-height:52px;font-size:15px" data-act="closeSheet">Agora não</button><button type="button" class="btn btn-primary btn-lg" style="min-height:52px;font-size:15px" data-act="migrateYes">Enviar para a nuvem</button></div>';
+  } else if (sh.type === 'finform') {
+    var ff = ui.ff, ftitle = { gasto: ff.id ? 'Editar gasto' : 'Registrar gasto', conta: ff.id ? 'Editar conta a pagar' : 'Nova conta a pagar', entrada: ff.id ? 'Editar entrada' : 'Registrar entrada' }[ff.kind];
+    var fcatOpts = ff.kind === 'entrada' ? INC_CATS.map(function (c) { return '<option value="' + esc(c) + '"' + (ff.cat === c ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('')
+      : finCats(true).filter(function (c) { return c.active !== false || c.id === ff.cat; }).map(function (c) { return '<option value="' + c.id + '"' + (ff.cat === c.id ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('');
+    h = '<h2>' + ftitle + '</h2>' + (ff.err ? '<div class="small bold" style="color:var(--warn-ink);margin-bottom:8px">' + esc(ff.err) + '</div>' : '') +
+      '<div class="col" style="gap:12px"><label class="field"><span>Descrição</span><input class="inp" id="ffdesc" type="text" autocomplete="off" placeholder="' + (ff.kind === 'entrada' ? 'Ex.: aporte para compra de equipamento' : 'Ex.: farinha, chocolate e manteiga') + '" value="' + esc(ff.desc) + '" data-in="ffDesc"></label>' +
+      '<label class="field"><span>Categoria</span><select class="box" id="ffcat" data-ch="ffCat">' + fcatOpts + '</select></label>' +
+      '<div class="grid2" style="gap:10px"><label class="field"><span>Valor (R$)</span><input class="inp" id="ffval" type="text" inputmode="decimal" placeholder="0,00" value="' + esc(ff.amount) + '" data-in="ffAmount"></label>' +
+      '<label class="field"><span>' + (ff.kind === 'conta' ? 'Vencimento' : (ff.kind === 'gasto' ? 'Data do gasto' : 'Data')) + '</span><input class="box" id="ffdate" type="date" value="' + esc(ff.date) + '" data-ch="ffDate"></label></div>' +
+      '<label class="field"><span>' + (ff.kind === 'entrada' ? 'Origem (opcional)' : 'Fornecedor (opcional)') + '</span><input class="inp" id="ffsup" type="text" autocomplete="off" value="' + esc(ff.supplier) + '" data-in="ffSup"></label>' +
+      (ff.kind === 'conta' ? '<label class="field"><span>Repetição</span><select class="box" id="ffrec" data-ch="ffRecur"><option value=""' + (ff.recur ? '' : ' selected') + '>Não se repete</option><option value="mensal"' + (ff.recur === 'mensal' ? ' selected' : '') + '>Todo mês (cria a próxima ao pagar)</option></select></label>'
+        : '<div><div class="label" style="margin-bottom:6px">Forma de pagamento</div><div class="row wrap">' + PAYS.map(function (m) { return '<button type="button" class="pill' + (ff.method === m ? ' on' : '') + '" data-act="ffMethod" data-m="' + m + '">' + m + '</button>'; }).join('') + '</div></div>') +
+      '<label class="field"><span>Observações (opcional)</span><input class="inp" id="ffnotes" type="text" autocomplete="off" value="' + esc(ff.notes) + '" data-in="ffNotes"></label></div>' +
+      '<div class="two"><button type="button" class="btn btn-outline btn-lg" style="min-height:52px;font-size:15px" data-act="closeSheet">Cancelar</button><button type="button" class="btn btn-primary btn-lg" style="min-height:52px;font-size:15px" data-act="ffSave">Salvar</button></div>' +
+      (ff.id ? '<button type="button" class="linkbtn warn" style="margin-top:8px" data-act="ffDelAsk">Excluir este lançamento</button>' : '');
+  } else if (sh.type === 'finpay' && finById(sh.id)) {
+    var fpb = finById(sh.id);
+    h = '<h2>Pagar conta</h2><div style="font-size:14px;line-height:1.45"><b>' + esc(fpb.desc) + '</b><br>Vencimento ' + esc(dmyFull(fpb.date)) + ' · valor ' + money(fpb.cents) + '</div>' +
+      (sh.err ? '<div class="small bold" style="color:var(--warn-ink);margin-top:8px">' + esc(sh.err) + '</div>' : '') +
+      '<div class="grid2" style="gap:10px;margin-top:14px"><label class="field"><span>Valor pago (R$)</span><input class="inp" id="fpv" type="text" inputmode="decimal" value="' + esc(sh.amount) + '" data-in="fpAmount"></label>' +
+      '<label class="field"><span>Data do pagamento</span><input class="box" id="fpd" type="date" value="' + esc(sh.date) + '" data-ch="fpDate"></label></div>' +
+      '<div class="label" style="margin:14px 0 8px">Forma de pagamento</div><div class="row wrap">' + PAYS.map(function (m) { return '<button type="button" class="pill' + (sh.method === m ? ' on' : '') + '" data-act="payMethod" data-m="' + m + '">' + m + '</button>'; }).join('') + '</div>' +
+      (fpb.recur === 'mensal' ? '<div class="note" style="margin-top:14px">Esta conta se repete todo mês: ao pagar, a próxima será criada para ' + esc(dmyFull(addMonths(fpb.date, 1))) + '.</div>' : '') +
+      '<div class="two"><button type="button" class="btn btn-outline btn-lg" style="min-height:52px;font-size:15px" data-act="closeSheet">Cancelar</button><button type="button" class="btn btn-green btn-lg" style="min-height:52px;font-size:15px" data-act="finPayConfirm">Confirmar pagamento</button></div>';
+  } else if (sh.type === 'finbal') {
+    h = '<h2>Saldo do caixa</h2><div class="small muted" style="line-height:1.5">Informe quanto a empresa tem agora (confira no banco e no dinheiro em caixa). O app soma as entradas e subtrai as saídas que acontecerem depois deste momento. Se escolher uma data passada, vale o saldo no fim daquele dia. Ajuste sempre que quiser conferir com o banco.</div>' +
+      (sh.err ? '<div class="small bold" style="color:var(--warn-ink);margin-top:8px">' + esc(sh.err) + '</div>' : '') +
+      '<div class="col" style="gap:12px;margin-top:14px"><div class="grid2" style="gap:10px"><label class="field"><span>Saldo (R$)</span><input class="inp" id="fbv" type="text" inputmode="decimal" placeholder="0,00" value="' + esc(sh.amount) + '" data-in="fbAmount"></label>' +
+      '<label class="field"><span>Data do saldo</span><input class="box" id="fbd" type="date" value="' + esc(sh.date) + '" data-ch="fbDate"></label></div>' +
+      '<label class="field"><span>Reserva mínima de segurança (R$)</span><input class="inp" id="fbr" type="text" inputmode="decimal" placeholder="0,00" value="' + esc(sh.reserve) + '" data-in="fbReserve"></label>' +
+      '<div class="small muted" style="line-height:1.45">A reserva é o valor que o caixa não deve atravessar (por exemplo, o custo de um mês). A previsão e o "Posso comprar?" usam esse valor.</div></div>' +
+      '<div class="two"><button type="button" class="btn btn-outline btn-lg" style="min-height:52px;font-size:15px" data-act="closeSheet">Cancelar</button><button type="button" class="btn btn-primary btn-lg" style="min-height:52px;font-size:15px" data-act="finBalSave">Salvar</button></div>';
+  } else if (sh.type === 'finexp') {
+    h = '<h2>' + esc(sh.title) + '</h2><div class="small muted" style="line-height:1.45">' + esc(sh.hint) + '</div>' +
+      '<textarea class="box" id="exptext" readonly style="min-height:240px;font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace;padding:10px;margin-top:10px;white-space:pre;overflow:auto" aria-label="Conteúdo do relatório">' + esc(sh.text) + '</textarea>' +
+      '<div class="two"><button type="button" class="btn btn-primary btn-lg" style="min-height:52px;font-size:15px" data-act="finDownload">Baixar arquivo</button><button type="button" class="btn btn-outline btn-lg" style="min-height:52px;font-size:15px" data-act="finCopy">Copiar</button></div>' +
+      '<button type="button" class="btn btn-ghost btn-lg btn-block" style="margin-top:10px;min-height:48px;font-size:15px" data-act="closeSheet">Fechar</button>';
   } else if (sh.type === 'confirm') {
     h = '<h2>' + esc(sh.title) + '</h2><div style="font-size:14px;line-height:1.45">' + esc(sh.text) + '</div><div class="two"><button type="button" class="btn btn-outline btn-lg" style="min-height:52px;font-size:15px" data-act="closeSheet">Cancelar</button><button type="button" class="btn btn-warn btn-lg" style="min-height:52px;font-size:15px" data-act="confirmYes">' + esc(sh.label) + '</button></div>';
   } else {
@@ -1134,6 +1356,663 @@ function viewLogin() {
   return '<div class="main solo"><div class="scroll" style="justify-content:center;gap:18px;padding-top:24px">' + logo + inner + '</div></div>';
 }
 
+/* ---------- financeiro: cálculos ---------- */
+function addMonths(date, n) {
+  var p = String(date).split('-'), y = +p[0], m = +p[1] - 1 + n, d = +p[2];
+  y += Math.floor(m / 12); m = ((m % 12) + 12) % 12;
+  var dd = Math.min(d, new Date(y, m + 1, 0).getDate()), mm = m + 1;
+  return y + '-' + (mm < 10 ? '0' : '') + mm + '-' + (dd < 10 ? '0' : '') + dd;
+}
+function nowStamp() { var d = new Date(); return today() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
+function daysBetween(a, b) { return Math.round((pdate(b) - pdate(a)) / 86400000); }
+function validDate(s) { return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !isNaN(pdate(s).getTime()); }
+function pctOf(a, b) { return b > 0 ? Math.round(a / b * 100) : 0; }
+function finCfg() { return db.settings.finCfg || FIN_DEFAULT; }
+function finCats(all) { return (finCfg().cats || []).filter(function (c) { return all || c.active !== false; }); }
+function finCatById(id) {
+  var l = finCfg().cats || [];
+  for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i];
+  return { id: id || 'sem', name: 'Sem categoria', kind: 'variavel', active: true };
+}
+/* quando o dinheiro realmente se mexeu: gasto/conta paga = data do pagamento; entrada = data da entrada */
+function finCash(e) {
+  if (e.type === 'in') return { date: e.date, cents: e.cents, sign: 1 };
+  if (!e.paid) return null;
+  return { date: e.paidDate || e.date, cents: e.paidCents != null ? e.paidCents : e.cents, sign: -1 };
+}
+/* instante em que o dinheiro entrou ou saiu do registro (usado só no dia do saldo informado) */
+function finStamp(e, c) { return e.type === 'in' ? (e.createdAt || c.date + ' 23:59:59') : (e.paidAt || e.createdAt || c.date + ' 23:59:59'); }
+function finFlows(from, to, after) {
+  var ad = after ? after.slice(0, 10) : null, r = { inSales: 0, inOrders: 0, inOther: 0, outTotal: 0, byCat: {}, byKind: { fixo: 0, variavel: 0, investimento: 0, retirada: 0 }, list: [] };
+  db.sales.forEach(function (s) {
+    if (!s.paid || s.date < from || s.date > to) return;
+    if (ad && s.date === ad && (s.date + ' ' + (s.time || '00:00')) < after) return;
+    r.inSales += s.cents;
+  });
+  db.orders.forEach(function (o) {
+    (o.payments || []).forEach(function (p) {
+      var d = payDay(p); if (d < from || d > to) return;
+      if (ad && d === ad && String(p.at) < after) return;
+      r.inOrders += p.cents;
+    });
+  });
+  db.fin.forEach(function (e) {
+    var c = finCash(e); if (!c || c.date < from || c.date > to) return;
+    if (ad && c.date === ad && finStamp(e, c) < after) return;
+    if (e.type === 'in') { r.inOther += c.cents; r.list.push({ e: e, c: c, cat: null }); return; }
+    var cat = finCatById(e.cat);
+    r.outTotal += c.cents; r.byCat[cat.id] = (r.byCat[cat.id] || 0) + c.cents; r.byKind[cat.kind] = (r.byKind[cat.kind] || 0) + c.cents;
+    r.list.push({ e: e, c: c, cat: cat });
+  });
+  r.revenue = r.inSales + r.inOrders; r.inTotal = r.revenue + r.inOther;
+  r.costs = r.byKind.fixo + r.byKind.variavel;
+  r.operating = r.revenue - r.costs; r.net = r.inTotal - r.outTotal;
+  return r;
+}
+/* saldo no fim do dia "upTo": saldo informado + entradas - saídas que aconteceram depois do instante em que o saldo foi informado */
+function finBalance(upTo) {
+  var cfg = finCfg(); if (!cfg.startDate) return null;
+  if (upTo < cfg.startDate) return cfg.startCents;
+  var f = finFlows(cfg.startDate, upTo, cfg.startAt || (cfg.startDate + ' 23:59:59'));
+  return cfg.startCents + f.inTotal - f.outTotal;
+}
+function finRange() {
+  var t = today(), p = ui.fPeriod, first = t.slice(0, 8) + '01', from, to = t;
+  if (p === 'mes') from = first;
+  else if (p === 'mespassado') { from = addMonths(first, -1); to = addDays(first, -1); }
+  else if (p === '90d') from = addDays(t, -89);
+  else if (p === 'ano') from = t.slice(0, 4) + '-01-01';
+  else if (p === 'outro') { from = validDate(ui.fFrom) ? ui.fFrom : first; to = validDate(ui.fTo) ? ui.fTo : t; if (from > to) { var x = from; from = to; to = x; } }
+  else from = addDays(t, -29);
+  return { from: from, to: to, days: daysBetween(from, to) + 1 };
+}
+function finPrevRange(r) { return { from: addDays(r.from, -r.days), to: addDays(r.from, -1), days: r.days }; }
+function finBillsOpen() {
+  return db.fin.filter(function (e) { return e.type === 'out' && e.origin === 'conta' && !e.paid; }).sort(function (x, y) { return x.date < y.date ? -1 : (x.date > y.date ? 1 : 0); });
+}
+function finForecast(days) {
+  var t = today(), bal0 = finBalance(t); if (bal0 === null) return null;
+  var cfg = finCfg(), n = days + 1, end = addDays(t, days), i, cIn = [], cOut = [], eIn = [], eOut = [], dates = [], items = [];
+  for (i = 0; i < n; i++) { cIn.push(0); cOut.push(0); eIn.push(0); eOut.push(0); dates.push(addDays(t, i)); }
+  var idx = function (d) { var k = daysBetween(t, d); return k < 0 ? 0 : k; };
+  finBillsOpen().forEach(function (b) {
+    var k, nd;
+    if (b.date <= end) { cOut[idx(b.date)] += b.cents; items.push({ date: b.date < t ? t : b.date, cents: b.cents, desc: b.desc, kind: 'conta', late: b.date < t }); }
+    if (b.recur === 'mensal') for (k = 1; k < 60; k++) {
+      nd = addMonths(b.date, k); if (nd > end) break; if (nd < t) continue;
+      cOut[idx(nd)] += b.cents; items.push({ date: nd, cents: b.cents, desc: b.desc, kind: 'recorrente', late: false });
+    }
+  });
+  var fiado = 0;
+  db.orders.forEach(function (o) {
+    var rem = orderRemaining(o); if (rem <= 0) return;
+    if (o.delivered) { fiado += rem; return; }
+    var d = o.deliveryDate || t; if (d > end) return;
+    cIn[idx(d)] += rem; items.push({ date: d < t ? t : d, cents: rem, desc: 'Encomenda · ' + custName(o), kind: 'encomenda', late: d < t });
+  });
+  db.sales.forEach(function (s) { if (!s.paid) fiado += s.cents; });
+  if (fiado > 0) eIn[Math.min(7, days)] += fiado;
+  var from28 = addDays(t, -27), salesSum = 0, varSum = 0;
+  db.sales.forEach(function (s) { if (s.paid && s.date >= from28 && s.date <= t) salesSum += s.cents; });
+  db.fin.forEach(function (e) {
+    if (e.type !== 'out' || e.origin !== 'gasto') return;
+    var c = finCash(e), k = finCatById(e.cat).kind;
+    if (c && c.date >= from28 && c.date <= t && (k === 'variavel' || k === 'fixo')) varSum += c.cents;
+  });
+  var avgSales = salesSum / 28, avgVar = varSum / 28;
+  for (i = 1; i < n; i++) { eIn[i] += avgSales; eOut[i] += avgVar; }
+  var cons = [], exp = [], c = bal0, x = bal0;
+  for (i = 0; i < n; i++) { c += cIn[i] - cOut[i]; x += cIn[i] - cOut[i] + eIn[i] - eOut[i]; cons.push(Math.round(c)); exp.push(Math.round(x)); }
+  var minOf = function (arr) { var m = 0; for (var j = 1; j < arr.length; j++) if (arr[j] < arr[m]) m = j; return { v: arr[m], date: dates[m], i: m }; };
+  items.sort(function (p, q) { return p.date < q.date ? -1 : (p.date > q.date ? 1 : 0); });
+  return { days: days, dates: dates, cons: cons, exp: exp, bal0: bal0, items: items, avgSales: avgSales, avgVar: avgVar, fiado: fiado, reserve: cfg.reserve || 0,
+    cIn: cIn, cOut: cOut, eIn: eIn, eOut: eOut, minExp: minOf(exp), minCons: minOf(cons) };
+}
+function finCanBuy(fc, amount, date) {
+  var i0 = Math.max(0, Math.min(fc.days, validDate(date) ? daysBetween(today(), date) : 0)), out = { amount: amount, i0: i0 };
+  [['exp', fc.exp], ['cons', fc.cons]].forEach(function (p) {
+    var min = null, neg = null, i, v;
+    for (i = i0; i < p[1].length; i++) { v = p[1][i] - amount; if (min === null || v < min.v) min = { v: v, i: i }; if (neg === null && v < 0) neg = i; }
+    out[p[0]] = { min: min.v, minDate: fc.dates[min.i], negDate: neg === null ? null : fc.dates[neg] };
+  });
+  out.verdict = out.exp.min >= fc.reserve ? 'cabe' : (out.exp.min >= 0 ? 'apertado' : 'nao');
+  return out;
+}
+function deltaHtml(cur, prev, goodUp) {
+  if (!prev) return '';
+  var p = Math.round((cur - prev) / prev * 100);
+  if (p === 0) return '<span class="tiny muted">igual ao período anterior</span>';
+  var up = p > 0, good = goodUp ? up : !up;
+  return '<span class="tiny bold" style="color:' + (good ? 'var(--green)' : 'var(--warn-ink)') + '">' + (up ? '▲' : '▼') + ' ' + Math.abs(p) + '% vs. anterior</span>';
+}
+function signed(c) { return (c < 0 ? '−' : '') + money(Math.abs(c)); }
+function relDue(date) {
+  var n = daysBetween(today(), date);
+  if (n < 0) return 'venceu há ' + (-n) + (n === -1 ? ' dia' : ' dias');
+  if (n === 0) return 'vence hoje';
+  if (n === 1) return 'vence amanhã';
+  return 'vence em ' + n + ' dias';
+}
+
+/* ---------- financeiro: exportações para planilha e análise ---------- */
+function csvCell(v) { var s = String(v == null ? '' : v); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+function csvNum(c) { return (c / 100).toFixed(2).replace('.', ','); }
+function csvOut(rows) { return rows.map(function (r) { return r.map(csvCell).join(';'); }).join('\r\n'); }
+function finExtratoCsv(from, to) {
+  var rows = [['Data', 'Mês', 'Tipo', 'Origem', 'Categoria', 'Descrição', 'Cliente ou fornecedor', 'Forma de pagamento', 'Entrada (R$)', 'Saída (R$)']], all = [];
+  db.sales.forEach(function (s) {
+    if (s.paid && s.date >= from && s.date <= to) all.push({ d: s.date, k: s.time || '', r: [s.date, s.date.slice(0, 7), 'Entrada', 'Venda de cookies', 'Vendas', countItems(s.items) + ' cookie(s)', custName(s), s.method || '', csvNum(s.cents), ''] });
+  });
+  db.orders.forEach(function (o) {
+    (o.payments || []).forEach(function (p) {
+      var d = payDay(p); if (d < from || d > to) return;
+      all.push({ d: d, k: String(p.at).slice(11), r: [d, d.slice(0, 7), 'Entrada', 'Encomenda (' + (KIND_LABEL[p.kind] || 'pagamento') + ')', 'Encomendas', 'Encomenda para ' + dmyFull(o.deliveryDate), custName(o), p.method || '', csvNum(p.cents), ''] });
+    });
+  });
+  db.fin.forEach(function (e) {
+    var c = finCash(e); if (!c || c.date < from || c.date > to) return;
+    if (e.type === 'in') all.push({ d: c.date, k: '', r: [c.date, c.date.slice(0, 7), 'Entrada', 'Entrada lançada', e.cat || '', e.desc, e.supplier || '', e.method || '', csvNum(c.cents), ''] });
+    else all.push({ d: c.date, k: '', r: [c.date, c.date.slice(0, 7), 'Saída', e.origin === 'conta' ? 'Conta paga' : 'Gasto', finCatById(e.cat).name, e.desc, e.supplier || '', e.paidMethod || e.method || '', '', csvNum(c.cents)] });
+  });
+  all.sort(function (a, b) { return a.d < b.d ? -1 : (a.d > b.d ? 1 : (a.k < b.k ? -1 : (a.k > b.k ? 1 : 0))); });
+  return csvOut(rows.concat(all.map(function (x) { return x.r; })));
+}
+function finCategoriasCsv(from, to) {
+  var r = { from: from, to: to, days: daysBetween(from, to) + 1 }, pr = finPrevRange(r), f = finFlows(from, to), p = finFlows(pr.from, pr.to);
+  var rows = [['Categoria', 'Tipo', 'Total (R$)', '% das saídas', 'Período anterior (R$)', 'Variação (%)']];
+  Object.keys(f.byCat).map(function (id) { return { c: finCatById(id), v: f.byCat[id], pv: p.byCat[id] || 0 }; }).sort(function (a, b) { return b.v - a.v; }).forEach(function (x) {
+    rows.push([x.c.name, KIND_NAMES[x.c.kind], csvNum(x.v), pctOf(x.v, f.outTotal), csvNum(x.pv), x.pv ? Math.round((x.v - x.pv) / x.pv * 100) : '']);
+  });
+  rows.push(['TOTAL', '', csvNum(f.outTotal), f.outTotal ? 100 : 0, csvNum(p.outTotal), p.outTotal ? Math.round((f.outTotal - p.outTotal) / p.outTotal * 100) : '']);
+  return csvOut(rows);
+}
+function finMonthKeys(from, to) { var out = [], m = from.slice(0, 7) + '-01'; while (m.slice(0, 7) <= to.slice(0, 7) && out.length < 60) { out.push(m); m = addMonths(m, 1); } return out; }
+function finMensalCsv(from, to) {
+  var rows = [['Mês', 'Faturamento (vendido)', 'Recebido de cookies', 'Recebido de encomendas', 'Outras entradas', 'Custos fixos', 'Custos variáveis', 'Investimentos', 'Retiradas', 'Resultado operacional', 'Variação do caixa']];
+  var tot = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  finMonthKeys(from, to).forEach(function (m1) {
+    var mf = m1 < from ? from : m1, ml = addDays(addMonths(m1, 1), -1), mt = ml > to ? to : ml, f = finFlows(mf, mt), fat = 0;
+    db.sales.forEach(function (s) { if (s.date >= mf && s.date <= mt) fat += s.cents; });
+    db.orders.forEach(function (o) { if (o.delivered && o.deliveredDate >= mf && o.deliveredDate <= mt) fat += orderTotal(o); });
+    var v = [fat, f.inSales, f.inOrders, f.inOther, f.byKind.fixo, f.byKind.variavel, f.byKind.investimento, f.byKind.retirada, f.operating, f.net];
+    v.forEach(function (x, i) { tot[i] += x; });
+    rows.push([m1.slice(0, 7)].concat(v.map(csvNum)));
+  });
+  rows.push(['TOTAL'].concat(tot.map(csvNum)));
+  return csvOut(rows);
+}
+function finContasCsv() {
+  var t = today(), rows = [['Vencimento', 'Descrição', 'Categoria', 'Fornecedor', 'Valor (R$)', 'Situação', 'Pago em', 'Valor pago (R$)', 'Repete']];
+  db.fin.filter(function (e) { return e.type === 'out' && e.origin === 'conta'; }).sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); }).forEach(function (e) {
+    rows.push([e.date, e.desc, finCatById(e.cat).name, e.supplier || '', csvNum(e.cents), e.paid ? 'Paga' : (e.date < t ? 'Atrasada' : 'Em aberto'), e.paid ? (e.paidDate || '') : '', e.paid ? csvNum(e.paidCents != null ? e.paidCents : e.cents) : '', e.recur === 'mensal' ? 'Todo mês' : 'Não']);
+  });
+  return csvOut(rows);
+}
+function finTextoResumo(from, to) {
+  var r = { from: from, to: to, days: daysBetween(from, to) + 1 }, pr = finPrevRange(r), f = finFlows(from, to), p = finFlows(pr.from, pr.to), t = today(), bal = finBalance(t), cfg = finCfg();
+  var L = [], rv = f.revenue, m = function (c) { return money(c); }, var_ = function (a, b) { return b ? (a >= b ? '+' : '−') + Math.abs(Math.round((a - b) / b * 100)) + '% vs. período anterior' : 'sem período anterior'; };
+  L.push('RESUMO FINANCEIRO · Vora Cookies');
+  L.push('Período: ' + dmyFull(from) + ' a ' + dmyFull(to) + ' (' + r.days + ' dias). Gerado em ' + dmyFull(t) + '.');
+  L.push('Saldo do caixa hoje: ' + (bal === null ? 'não informado' : m(bal)) + '. Reserva mínima definida: ' + m(cfg.reserve || 0) + '.');
+  L.push('');
+  L.push('ENTRADAS: ' + m(f.inTotal) + ' (' + var_(f.inTotal, p.inTotal) + ')');
+  L.push('- Receita recebida: ' + m(rv) + ' (cookies ' + m(f.inSales) + '; encomendas ' + m(f.inOrders) + ')');
+  L.push('- Outras entradas (aportes, reembolsos): ' + m(f.inOther));
+  L.push('SAÍDAS: ' + m(f.outTotal) + ' (' + var_(f.outTotal, p.outTotal) + ')');
+  L.push('- Custos fixos: ' + m(f.byKind.fixo) + ' (' + pctOf(f.byKind.fixo, rv) + '% da receita)');
+  L.push('- Custos variáveis: ' + m(f.byKind.variavel) + ' (' + pctOf(f.byKind.variavel, rv) + '% da receita)');
+  L.push('- Investimentos: ' + m(f.byKind.investimento) + '; retiradas do sócio: ' + m(f.byKind.retirada));
+  L.push('RESULTADO OPERACIONAL (receita - custos fixos - custos variáveis): ' + signed(f.operating) + (rv ? ' · margem ' + Math.round(f.operating / rv * 100) + '%' : ''));
+  L.push('VARIAÇÃO DO CAIXA NO PERÍODO: ' + signed(f.net));
+  L.push('');
+  L.push('GASTOS POR CATEGORIA (valor · % das saídas · variação):');
+  var cats = Object.keys(f.byCat).map(function (id) { return { c: finCatById(id), v: f.byCat[id], pv: p.byCat[id] || 0 }; }).sort(function (a, b) { return b.v - a.v; });
+  if (!cats.length) L.push('- (nenhum gasto registrado)');
+  cats.forEach(function (x) { L.push('- ' + x.c.name + ' [' + KIND_NAMES[x.c.kind] + ']: ' + m(x.v) + ' · ' + pctOf(x.v, f.outTotal) + '% · ' + var_(x.v, x.pv)); });
+  L.push('');
+  var big = f.list.filter(function (x) { return x.e.type === 'out'; }).sort(function (a, b) { return b.c.cents - a.c.cents; }).slice(0, 5);
+  L.push('MAIORES GASTOS:');
+  if (!big.length) L.push('- (nenhum)');
+  big.forEach(function (x) { L.push('- ' + dmyFull(x.c.date) + ' · ' + x.e.desc + ' · ' + x.cat.name + ' · ' + m(x.c.cents)); });
+  L.push('');
+  var open = finBillsOpen(), late = open.filter(function (b) { return b.date < t; }), in30 = open.filter(function (b) { return b.date >= t && b.date <= addDays(t, 30); });
+  L.push('CONTAS A PAGAR: ' + open.length + ' em aberto (' + m(open.reduce(function (a, b) { return a + b.cents; }, 0)) + '); ' + late.length + ' atrasadas (' + m(late.reduce(function (a, b) { return a + b.cents; }, 0)) + '); vencem em 30 dias: ' + in30.length + ' (' + m(in30.reduce(function (a, b) { return a + b.cents; }, 0)) + ').');
+  var fc = finForecast(30);
+  if (fc) {
+    L.push('PREVISÃO DE 30 DIAS: saldo esperado ' + m(fc.exp[fc.days]) + ' (pior ponto ' + m(fc.minExp.v) + ' em ' + dmyFull(fc.minExp.date) + '); cenário conservador (sem novas vendas): ' + m(fc.cons[fc.days]) + ' (pior ponto ' + m(fc.minCons.v) + ').');
+    L.push('Ritmo dos últimos 28 dias: vendas de cookies ' + m(Math.round(fc.avgSales)) + ' por dia; gastos avulsos ' + m(Math.round(fc.avgVar)) + ' por dia.');
+  }
+  L.push('');
+  L.push('PERGUNTAS PARA ANÁLISE:');
+  L.push('1. Quais categorias mais pesam e quais subiram mais? Onde dá para cortar ou renegociar?');
+  L.push('2. A margem operacional está saudável? O que mudaria o resultado (preço, custo de insumos, mix de sabores)?');
+  L.push('3. O caixa cobre os próximos 30 a 90 dias com a reserva mínima? Quando é seguro investir?');
+  L.push('4. Que riscos de caixa aparecem (contas atrasadas, concentração de vencimentos)?');
+  return L.join('\n');
+}
+
+/* ---------- FINANCEIRO ---------- */
+function finKpi(t, v, sub, cls) {
+  return '<div class="mini ' + (cls || '') + '" style="padding:14px"><div class="t">' + t + '</div><div class="v" style="font-size:24px;margin-top:2px">' + v + '</div><div style="margin-top:2px">' + (sub || '') + '</div></div>';
+}
+function fr(label, value, o) {
+  o = o || {};
+  return '<div class="row between" style="min-height:' + (o.big ? 46 : 38) + 'px;border-bottom:1px solid var(--line2);gap:10px;' + (o.indent ? 'padding-left:14px;' : '') + '"><span class="' + (o.bold ? 'bold' : (o.muted ? 'small muted' : '')) + '" style="font-size:' + (o.muted ? 13 : 14) + 'px">' + label + '</span>' +
+    '<span class="' + (o.bold ? 'bold' : '') + '" style="' + (o.color ? 'color:' + o.color + ';' : '') + 'text-align:right">' + value + '</span></div>';
+}
+function finPeriodBar(r) {
+  var ps = [['mes', 'Este mês'], ['mespassado', 'Mês passado'], ['30d', '30 dias'], ['90d', '90 dias'], ['ano', 'Ano'], ['outro', 'Outro']];
+  var h = '<div class="row wrap" style="gap:6px">' + ps.map(function (p) {
+    return '<button type="button" class="pill' + (ui.fPeriod === p[0] ? ' on' : '') + '" style="min-height:38px;padding:0 14px;font-size:13px" data-act="finPeriod" data-p="' + p[0] + '">' + p[1] + '</button>';
+  }).join('') + '</div>';
+  if (ui.fPeriod === 'outro') h += '<div class="grid2" style="gap:10px"><label class="field"><span>De</span><input class="box" type="date" value="' + esc(r.from) + '" data-ch="fFrom"></label><label class="field"><span>Até</span><input class="box" type="date" value="' + esc(r.to) + '" data-ch="fTo"></label></div>';
+  return '<div class="col" style="gap:8px">' + h + '<div class="small muted">' + esc(dmyFull(r.from)) + ' a ' + esc(dmyFull(r.to)) + ' · ' + r.days + (r.days === 1 ? ' dia' : ' dias') + '</div></div>';
+}
+function moneyN(c) { return money(c).replace('R$ ', ''); }
+function signedN(c) { return (c < 0 ? '−' : '') + moneyN(Math.abs(c)); }
+function finAlerts(noForecast) {
+  var t = today(), open = finBillsOpen(), late = open.filter(function (b) { return b.date < t; }), soon = open.filter(function (b) { return b.date >= t && b.date <= addDays(t, 7); }), h = '';
+  var sum = function (l) { return l.reduce(function (a, b) { return a + b.cents; }, 0); };
+  if (late.length) h += '<div class="alert row between"><div><div class="bold" style="font-size:14px">' + late.length + (late.length === 1 ? ' conta atrasada' : ' contas atrasadas') + ' · ' + money(sum(late)) + '</div><div class="small">Pague ou ajuste o vencimento para o caixa refletir a realidade.</div></div><button type="button" class="btn btn-warn btn-sm" data-act="finTab" data-t="contas">Ver contas</button></div>';
+  if (soon.length) h += '<div class="note row between"><span>' + soon.length + (soon.length === 1 ? ' conta vence' : ' contas vencem') + ' nos próximos 7 dias · ' + money(sum(soon)) + '</span><button type="button" class="linkbtn" data-act="finTab" data-t="contas">Ver</button></div>';
+  var fc = noForecast ? null : finForecast(30);
+  if (fc && fc.minExp.v < 0) h += '<div class="alert row between"><div><div class="bold" style="font-size:14px">Previsão: o caixa fica negativo em ' + esc(dmyFull(fc.minExp.date)) + ' (' + signed(fc.minExp.v) + ')</div><div class="small">No ritmo dos últimos 28 dias e com as contas já lançadas.</div></div><button type="button" class="btn btn-warn btn-sm" data-act="finTab" data-t="prev">Ver previsão</button></div>';
+  else if (fc && fc.reserve > 0 && fc.minExp.v < fc.reserve) h += '<div class="alert row between"><div><div class="bold" style="font-size:14px">Previsão: o caixa chega a ' + money(fc.minExp.v) + ', abaixo da reserva de ' + money(fc.reserve) + '</div></div><button type="button" class="btn btn-warn btn-sm" data-act="finTab" data-t="prev">Ver previsão</button></div>';
+  return h;
+}
+function finResultCard(f) {
+  var rv = f.revenue, pc = function (a) { return rv ? ' · ' + pctOf(a, rv) + '% da receita' : ''; };
+  var h = '<div class="card"><div class="bold" style="font-size:15px;margin-bottom:4px">Resultado do período</div>' +
+    fr('Receita recebida', money(rv), { bold: 1 }) + fr('Vendas de cookies', money(f.inSales), { indent: 1, muted: 1 }) + fr('Encomendas (sinais e saldos)', money(f.inOrders), { indent: 1, muted: 1 }) +
+    fr('(−) Custos fixos', signed(-f.byKind.fixo) + pc(f.byKind.fixo)) + fr('(−) Custos variáveis', signed(-f.byKind.variavel) + pc(f.byKind.variavel)) +
+    fr('= Resultado operacional', signed(f.operating) + (rv ? ' · margem ' + Math.round(f.operating / rv * 100) + '%' : ''), { bold: 1, big: 1, color: f.operating < 0 ? 'var(--warn-ink)' : 'var(--green)' }) +
+    fr('(+) Outras entradas (aportes, reembolsos)', money(f.inOther)) + fr('(−) Investimentos', signed(-f.byKind.investimento)) + fr('(−) Retiradas do sócio', signed(-f.byKind.retirada)) +
+    fr('= Variação do caixa', signed(f.net), { bold: 1, big: 1, color: f.net < 0 ? 'var(--warn-ink)' : 'var(--green)' }) +
+    '<div class="small muted" style="margin-top:8px;line-height:1.45">Resultado operacional mostra se o negócio dá lucro antes de investimentos e retiradas. A variação do caixa é o que realmente sobrou (ou faltou) no período.</div></div>';
+  return h;
+}
+function finCatCard(f, p) {
+  var rows = Object.keys(f.byCat).map(function (id) { return { c: finCatById(id), v: f.byCat[id], pv: p.byCat[id] || 0 }; }).sort(function (a, b) { return b.v - a.v; });
+  var h = '<div class="card"><div class="bold" style="font-size:15px">Para onde vai o dinheiro</div>';
+  if (!rows.length) return h + '<div class="empty">Nenhum gasto registrado neste período.<br>Use Lançamentos para registrar gastos e Contas a pagar para o que vence.</div></div>';
+  var top = rows[0].v || 1;
+  h += '<div class="grid2" style="gap:8px;margin:10px 0 14px">' + ['fixo', 'variavel', 'investimento', 'retirada'].map(function (k) {
+    return '<div class="mini"><div class="t">' + KIND_NAMES[k] + '</div><div class="v" style="font-size:17px">' + money(f.byKind[k] || 0) + '</div><div class="tiny muted">' + pctOf(f.byKind[k] || 0, f.outTotal) + '% das saídas</div></div>';
+  }).join('') + '</div><div class="col" style="gap:12px">' + rows.map(function (r) {
+    return '<div><div class="row between" style="align-items:baseline;font-size:13px;gap:8px"><span class="bold" style="font-weight:600">' + esc(r.c.name) + ' <span class="tiny muted">· ' + KIND_NAMES[r.c.kind] + '</span></span>' +
+      '<span class="small muted" style="white-space:nowrap"><b style="font-size:15px;color:var(--ink)">' + money(r.v) + '</b> · ' + pctOf(r.v, f.outTotal) + '%</span></div><div class="bar"><i style="width:' + Math.round(r.v / top * 100) + '%"></i></div>' + (r.pv ? '<div>' + deltaHtml(r.v, r.pv, false) + '</div>' : '') + '</div>';
+  }).join('') + '</div></div>';
+  return h;
+}
+function finSourceCard(f) {
+  var rows = [['Vendas de cookies', f.inSales], ['Encomendas (sinais e saldos)', f.inOrders], ['Outras entradas', f.inOther]], top = Math.max(f.inSales, f.inOrders, f.inOther, 1);
+  return '<div class="card"><div class="bold" style="font-size:15px">De onde vem o dinheiro</div><div class="col" style="gap:12px;margin-top:10px">' + rows.map(function (r) {
+    return '<div><div class="row between" style="align-items:baseline;font-size:13px"><span class="bold" style="font-weight:600">' + r[0] + '</span><span class="small muted"><b style="font-size:15px;color:var(--ink)">' + money(r[1]) + '</b> · ' + pctOf(r[1], f.inTotal) + '%</span></div><div class="bar"><i style="width:' + Math.round(r[1] / top * 100) + '%;background:var(--green-solid)"></i></div></div>';
+  }).join('') + '</div></div>';
+}
+function finTopCard(f) {
+  var big = f.list.filter(function (x) { return x.e.type === 'out'; }).sort(function (a, b) { return b.c.cents - a.c.cents; }).slice(0, 5);
+  var h = '<div class="card"><div class="bold" style="font-size:15px;margin-bottom:4px">Maiores gastos do período</div>';
+  if (!big.length) return h + '<div class="empty" style="padding:12px 0">Nenhum gasto no período.</div></div>';
+  return h + big.map(function (x) { return '<div class="row between" style="min-height:46px;border-bottom:1px solid var(--line2);gap:10px"><div style="min-width:0"><div class="bold" style="font-size:14px">' + esc(x.e.desc) + '</div><div class="small muted">' + esc(dmyFull(x.c.date)) + ' · ' + esc(x.cat.name) + '</div></div><b>' + money(x.c.cents) + '</b></div>'; }).join('') + '</div>';
+}
+function finTabGeral() {
+  var r = finRange(), pr = finPrevRange(r), f = finFlows(r.from, r.to), p = finFlows(pr.from, pr.to), bal = finBalance(today()), h = finPeriodBar(r);
+  if (bal === null) h += '<div class="alert row between"><div><div class="bold" style="font-size:14px">Informe o saldo do caixa</div><div class="small">Com o saldo de hoje o app calcula o caixa e a previsão. Sem ele, os demais números já funcionam.</div></div><button type="button" class="btn btn-warn btn-sm" data-act="finBalOpen">Informar saldo</button></div>';
+  h += finAlerts();
+  h += '<div class="fgrid">' + finKpi('Saldo em caixa', bal === null ? '—' : money(bal), '<span class="tiny muted">' + (bal === null ? 'informe o saldo' : 'hoje') + '</span>', bal !== null && bal < 0 ? 'warn' : '') +
+    finKpi('Entradas', money(f.inTotal), deltaHtml(f.inTotal, p.inTotal, true), 'ok') + finKpi('Saídas', money(f.outTotal), deltaHtml(f.outTotal, p.outTotal, false), '') +
+    finKpi('Variação do caixa', signed(f.net), deltaHtml(f.net, p.net, true), f.net < 0 ? 'warn' : 'ok') + '</div>';
+  h += '<div class="finsplit">' + '<div class="col" style="gap:14px">' + finResultCard(f) + finSourceCard(f) + '</div>' + '<div class="col" style="gap:14px">' + finCatCard(f, p) + finTopCard(f) + '</div></div>';
+  return h;
+}
+function finRow(x) {
+  var e = x.e, isIn = e.type === 'in', sub = [isIn ? (e.cat || 'Entrada') : x.cat.name, e.supplier, e.paidMethod || e.method, e.origin === 'conta' ? 'conta paga' : ''].filter(Boolean).map(esc).join(' · ');
+  return '<div class="row" style="min-height:56px;border-bottom:1px solid var(--line2);gap:10px"><div class="small muted" style="width:44px">' + esc(dmyFull(x.c.date).slice(0, 5)) + '</div><div style="flex:1;min-width:0"><div class="bold" style="font-size:14px">' + esc(e.desc) + '</div><div class="small muted">' + sub + '</div></div>' +
+    '<b style="color:' + (isIn ? 'var(--green)' : 'var(--ink)') + ';white-space:nowrap">' + (isIn ? '+' : '−') + money(x.c.cents) + '</b><button type="button" class="linkbtn" data-act="finEdit" data-id="' + e.id + '">Editar</button></div>';
+}
+function finTabLanc() {
+  var r = finRange(), f = finFlows(r.from, r.to), cat = ui.fCat, rows = f.list.filter(function (x) { return !cat || (cat === '__in' ? x.e.type === 'in' : (x.cat && x.cat.id === cat)); });
+  rows.sort(function (a, b) { return a.c.date < b.c.date ? 1 : (a.c.date > b.c.date ? -1 : 0); });
+  var opts = '<option value="">Todas as categorias</option>' + finCats(true).map(function (c) { return '<option value="' + c.id + '"' + (cat === c.id ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('') + '<option value="__in"' + (cat === '__in' ? ' selected' : '') + '>Só entradas lançadas</option>';
+  var h = finPeriodBar(r) + '<div class="row wrap" style="gap:8px"><button type="button" class="btn btn-primary btn-sm" data-act="finNew" data-kind="gasto">+ Registrar gasto</button><button type="button" class="btn btn-outline btn-sm" data-act="finNew" data-kind="entrada">+ Registrar entrada</button>' +
+    '<select class="box" style="width:auto;min-height:44px;font-size:14px" data-ch="fCat" aria-label="Filtrar por categoria">' + opts + '</select></div>' +
+    '<div class="grid2" style="gap:10px"><div class="mini"><div class="t">Saídas lançadas</div><div class="v" style="font-size:20px">' + money(f.outTotal) + '</div></div><div class="mini ok"><div class="t">Entradas lançadas</div><div class="v" style="font-size:20px">' + money(f.inOther) + '</div></div></div>';
+  h += '<div class="card" style="padding:6px 16px">' + (rows.length ? rows.map(finRow).join('') : '<div class="empty">Nenhum lançamento neste período.<br>As vendas e encomendas entram sozinhas no caixa; aqui ficam seus gastos, contas pagas e outras entradas.</div>') + '</div>';
+  return h;
+}
+function finBillRow(b, paid) {
+  var cat = finCatById(b.cat), late = !paid && b.date < today();
+  return '<div class="row" style="min-height:62px;border-bottom:1px solid var(--line2);gap:10px;flex-wrap:wrap"><div style="flex:1;min-width:180px"><div class="bold" style="font-size:14px">' + esc(b.desc) + (b.recur === 'mensal' ? ' <span class="chip chip-plain" style="height:22px;font-size:10px;padding:0 8px">todo mês</span>' : '') + '</div>' +
+    '<div class="small muted">' + esc(cat.name) + (b.supplier ? ' · ' + esc(b.supplier) : '') + '</div>' +
+    '<div class="small" style="' + (late ? 'color:var(--warn-ink);font-weight:700' : '') + '">' + (paid ? 'Paga em ' + esc(dmyFull(b.paidDate || b.date)) : esc(dmyFull(b.date)) + ' · ' + esc(relDue(b.date))) + '</div></div>' +
+    '<b style="white-space:nowrap">' + money(paid && b.paidCents != null ? b.paidCents : b.cents) + '</b>' +
+    (paid ? '<button type="button" class="linkbtn warn" data-act="finUnpayAsk" data-id="' + b.id + '">Desfazer</button>'
+          : '<button type="button" class="btn btn-green btn-sm" data-act="finPayOpen" data-id="' + b.id + '">Pagar</button><button type="button" class="linkbtn" data-act="finEdit" data-id="' + b.id + '">Editar</button>') + '</div>';
+}
+function finTabContas() {
+  var t = today(), open = finBillsOpen(), sum = function (l) { return l.reduce(function (a, b) { return a + b.cents; }, 0); };
+  var late = open.filter(function (b) { return b.date < t; }), w1 = open.filter(function (b) { return b.date >= t && b.date <= addDays(t, 7); }),
+    w30 = open.filter(function (b) { return b.date > addDays(t, 7) && b.date <= addDays(t, 30); }), later = open.filter(function (b) { return b.date > addDays(t, 30); });
+  var paid = db.fin.filter(function (e) { return e.type === 'out' && e.origin === 'conta' && e.paid; }).sort(function (a, b) { return (a.paidDate || '') < (b.paidDate || '') ? 1 : -1; }).slice(0, 8);
+  var sec = function (title, list, cls) {
+    return list.length ? '<div class="card" style="padding:8px 16px"><div class="row between" style="min-height:40px"><span class="bold" style="font-size:14px;' + (cls || '') + '">' + title + ' · ' + list.length + '</span><b>' + money(sum(list)) + '</b></div>' + list.map(function (b) { return finBillRow(b, false); }).join('') + '</div>' : '';
+  };
+  var h = '<div class="row wrap" style="gap:8px"><button type="button" class="btn btn-primary btn-sm" data-act="finNew" data-kind="conta">+ Nova conta a pagar</button></div>' +
+    '<div class="fgrid">' + finKpi('Atrasadas', money(sum(late)), '<span class="tiny muted">' + late.length + (late.length === 1 ? ' conta' : ' contas') + '</span>', late.length ? 'warn' : '') + finKpi('Próximos 7 dias', money(sum(w1)), '<span class="tiny muted">' + w1.length + (w1.length === 1 ? ' conta' : ' contas') + '</span>', '') +
+    finKpi('Até 30 dias', money(sum(late) + sum(w1) + sum(w30)), '<span class="tiny muted">inclui atrasadas</span>', '') + finKpi('Total em aberto', money(sum(open)), '<span class="tiny muted">' + open.length + (open.length === 1 ? ' conta' : ' contas') + '</span>', '') + '</div>';
+  h += sec('Atrasadas', late, 'color:var(--warn-ink)') + sec('Próximos 7 dias', w1) + sec('De 8 a 30 dias', w30) + sec('Depois de 30 dias', later);
+  if (!open.length) h += '<div class="card"><div class="empty">Nenhuma conta em aberto.<br>Lance aluguel, energia, fornecedores a prazo e impostos para ver o que vem pela frente.</div></div>';
+  if (paid.length) h += '<div class="card" style="padding:8px 16px"><div class="bold" style="font-size:14px;min-height:40px;display:flex;align-items:center">Pagas recentemente</div>' + paid.map(function (b) { return finBillRow(b, true); }).join('') + '</div>';
+  return h;
+}
+function forecastSvg(fc) {
+  var W = 640, H = 230, pl = 62, pr = 14, pt = 14, pb = 28, n = fc.exp.length, all = fc.exp.concat(fc.cons, [0]);
+  if (fc.reserve > 0) all.push(fc.reserve);
+  var mn = Math.min.apply(null, all), mx = Math.max.apply(null, all); if (mx === mn) mx = mn + 1;
+  var X = function (i) { return pl + (W - pl - pr) * i / Math.max(1, n - 1); }, Y = function (v) { return pt + (H - pt - pb) * (1 - (v - mn) / (mx - mn)); };
+  var line = function (arr) { return arr.map(function (v, i) { return (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); }).join(' '); };
+  var lab = function (v, y) { return '<text x="' + (pl - 6) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end" font-size="11" fill="var(--muted)">' + esc(money(v).replace('R$ ', '')) + '</text>'; };
+  var g = '';
+  if (mn < 0) g += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + Y(0).toFixed(1) + '" y2="' + Y(0).toFixed(1) + '" stroke="var(--warn-ink)" stroke-width="1"/>' + lab(0, Y(0));
+  if (fc.reserve > 0) g += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + Y(fc.reserve).toFixed(1) + '" y2="' + Y(fc.reserve).toFixed(1) + '" stroke="var(--muted)" stroke-width="1" stroke-dasharray="2 4"/>';
+  g += lab(mx, Y(mx)) + lab(mn, Y(mn));
+  g += '<path d="' + line(fc.cons) + '" fill="none" stroke="var(--muted)" stroke-width="2" stroke-dasharray="6 4"/><path d="' + line(fc.exp) + '" fill="none" stroke="var(--primary)" stroke-width="3" stroke-linejoin="round"/>';
+  g += '<circle cx="' + X(fc.minExp.i).toFixed(1) + '" cy="' + Y(fc.minExp.v).toFixed(1) + '" r="5" fill="var(--primary)"/>';
+  [0, Math.floor((n - 1) / 2), n - 1].forEach(function (i, k) { g += '<text x="' + X(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="' + (k === 0 ? 'start' : (k === 2 ? 'end' : 'middle')) + '" font-size="11" fill="var(--muted)">' + esc(dmyFull(fc.dates[i]).slice(0, 5)) + '</text>'; });
+  return '<svg class="fsvg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Projeção do saldo do caixa nos próximos ' + fc.days + ' dias">' + g + '</svg>';
+}
+function finWeeks(fc) {
+  var rows = [], w, s, e, i, inn, out;
+  for (w = 0; 7 * w + 1 <= fc.days; w++) {
+    s = w === 0 ? 0 : 7 * w + 1; e = Math.min(7 * w + 7, fc.days); inn = 0; out = 0;
+    for (i = s; i <= e; i++) { inn += fc.cIn[i] + fc.eIn[i]; out += fc.cOut[i] + fc.eOut[i]; }
+    rows.push({ from: fc.dates[s], to: fc.dates[e], inn: Math.round(inn), out: Math.round(out), exp: fc.exp[e], cons: fc.cons[e] });
+  }
+  return rows;
+}
+function finSimCard(fc) {
+  var s = ui.fSim, amount = parseMoney(s.amount), date = validDate(s.date) ? s.date : today();
+  var room = Math.max(0, fc.minExp.v - fc.reserve);
+  var h = '<div class="card col"><div class="bold" style="font-size:15px">Posso comprar ou investir?</div>' +
+    '<div class="small muted" style="line-height:1.45">Informe o valor e a data da compra. O app testa o caixa previsto nos próximos ' + fc.days + ' dias, mantendo a reserva mínima.</div>' +
+    '<div class="note">Disponível hoje sem passar da reserva (' + money(fc.reserve) + '): <b>' + money(room) + '</b></div>' +
+    '<div class="grid2" style="gap:10px"><label class="field"><span>Valor (R$)</span><input class="inp" id="simv" type="text" inputmode="decimal" placeholder="0,00" value="' + esc(s.amount) + '" data-in="simAmount"></label>' +
+    '<label class="field"><span>Data da compra</span><input class="box" id="simd" type="date" value="' + esc(date) + '" data-ch="simDate"></label></div>';
+  if (amount > 0) {
+    var c = finCanBuy(fc, amount, date), ok = c.verdict === 'cabe';
+    h += '<div class="big ' + (ok ? 'ok' : 'warn') + '"><div class="bold" style="font-size:16px">' + (c.verdict === 'cabe' ? 'Cabe no caixa' : (c.verdict === 'apertado' ? 'Cabe, mas deixa o caixa abaixo da reserva' : 'Não cabe: o caixa ficaria negativo')) + '</div>' +
+      '<div style="font-size:14px;line-height:1.5;margin-top:6px">Gastando ' + money(amount) + ' em ' + esc(dmyFull(date)) + ', o pior ponto previsto é <b>' + signed(c.exp.min) + '</b> em ' + esc(dmyFull(c.exp.minDate)) + '.' +
+      (c.exp.negDate ? ' O saldo fica negativo a partir de ' + esc(dmyFull(c.exp.negDate)) + '.' : '') + '</div>' +
+      '<div class="small" style="margin-top:8px">Se as vendas pararem (cenário conservador): pior ponto ' + signed(c.cons.min) + (c.cons.negDate ? ', negativo a partir de ' + esc(dmyFull(c.cons.negDate)) : '') + '.</div></div>';
+  }
+  return h + '</div>';
+}
+function finTabPrev() {
+  var hz = ui.fHor, fc = finForecast(hz), h = '<div class="row wrap" style="gap:6px">' + [30, 60, 90].map(function (d) {
+    return '<button type="button" class="pill' + (hz === d ? ' on' : '') + '" style="min-height:38px;padding:0 14px;font-size:13px" data-act="finHor" data-h="' + d + '">Próximos ' + d + ' dias</button>';
+  }).join('') + '</div>';
+  if (!fc) return h + '<div class="alert row between"><div><div class="bold" style="font-size:14px">Informe o saldo do caixa para ver a previsão</div><div class="small">A previsão parte do saldo de hoje.</div></div><button type="button" class="btn btn-warn btn-sm" data-act="finBalOpen">Informar saldo</button></div>';
+  h += finAlerts(true);
+  h += '<div class="fgrid">' + finKpi('Saldo hoje', money(fc.bal0), '', '') + finKpi('Em ' + hz + ' dias (esperado)', signed(fc.exp[fc.days]), '<span class="tiny muted">conservador: ' + signed(fc.cons[fc.days]) + '</span>', fc.exp[fc.days] < fc.reserve ? 'warn' : 'ok') +
+    finKpi('Pior ponto (esperado)', signed(fc.minExp.v), '<span class="tiny muted">em ' + esc(dmyFull(fc.minExp.date)) + '</span>', fc.minExp.v < 0 ? 'warn' : '') + finKpi('Pior ponto (conservador)', signed(fc.minCons.v), '<span class="tiny muted">sem novas vendas · ' + esc(dmyFull(fc.minCons.date)) + '</span>', fc.minCons.v < 0 ? 'warn' : '') + '</div>';
+  h += '<div class="card"><div class="bold" style="font-size:15px">Saldo previsto do caixa</div><div class="row wrap" style="gap:14px;margin:6px 0 8px;font-size:12px"><span><b style="color:var(--primary)">━</b> esperado</span><span><b style="color:var(--muted)">╌</b> conservador</span><span class="muted">pontilhada: reserva mínima</span></div>' + forecastSvg(fc) + '</div>';
+  h += '<div class="finsplit"><div class="col" style="gap:14px">' + finSimCard(fc) +
+    '<div class="card"><div class="bold" style="font-size:15px;margin-bottom:6px">Como a previsão é calculada</div><div class="small muted" style="line-height:1.55"><b>Conservador:</b> saldo de hoje, menos as contas a pagar lançadas (inclusive as que se repetem todo mês), mais o que falta receber das encomendas na data da entrega. Não conta novas vendas.<br><b>Esperado:</b> o conservador mais as vendas a receber em 7 dias, mais o ritmo dos últimos 28 dias (vendas de cookies de ' + money(Math.round(fc.avgSales)) + ' por dia, menos gastos avulsos de ' + money(Math.round(fc.avgVar)) + ' por dia).</div></div></div>';
+  var wk = finWeeks(fc);
+  h += '<div class="col" style="gap:14px"><div class="card"><div class="bold" style="font-size:15px;margin-bottom:2px">Semana a semana</div><div class="small muted" style="margin-bottom:6px">valores em R$</div><div class="tbl h" style="grid-template-columns:minmax(0,1.25fr) repeat(4,minmax(0,1fr))"><span>Semana</span><span>Entra</span><span>Sai</span><span>Esperado</span><span>Conserv.</span></div>' + wk.map(function (x) {
+    return '<div class="tbl r" style="grid-template-columns:minmax(0,1.25fr) repeat(4,minmax(0,1fr));font-size:12px;white-space:nowrap"><span>' + esc(dmyFull(x.from).slice(0, 5)) + ' a ' + esc(dmyFull(x.to).slice(0, 5)) + '</span><span>' + moneyN(x.inn) + '</span><span>' + moneyN(x.out) + '</span><b style="color:' + (x.exp < 0 ? 'var(--warn-ink)' : 'var(--ink)') + '">' + signedN(x.exp) + '</b><span style="color:' + (x.cons < 0 ? 'var(--warn-ink)' : 'var(--muted)') + '">' + signedN(x.cons) + '</span></div>';
+  }).join('') + '</div>' +
+    '<div class="card" style="padding:8px 16px"><div class="bold" style="font-size:15px;min-height:44px;display:flex;align-items:center">Compromissos e recebimentos previstos</div>' + (fc.items.length ? fc.items.map(function (x) {
+      var isIn = x.kind === 'encomenda';
+      return '<div class="row between" style="min-height:44px;border-bottom:1px solid var(--line2);gap:10px"><div style="min-width:0"><div class="bold" style="font-size:13px">' + esc(x.desc) + '</div><div class="small muted">' + esc(dmyFull(x.date)) + (x.late ? ' · atrasada' : '') + (x.kind === 'recorrente' ? ' · repete todo mês' : '') + '</div></div><b style="color:' + (isIn ? 'var(--green)' : 'var(--ink)') + '">' + (isIn ? '+' : '−') + money(x.cents) + '</b></div>';
+    }).join('') : '<div class="empty" style="padding:12px 0">Nada lançado para este período.</div>') + '</div></div></div>';
+  return h;
+}
+function finTabRel() {
+  var r = finRange(), btn = function (k, t, d) { return '<div class="row between" style="min-height:68px;border-bottom:1px solid var(--line2);gap:12px;padding:8px 0"><div style="min-width:0"><div class="bold" style="font-size:14px;margin-bottom:2px">' + t + '</div><div class="small muted" style="line-height:1.4">' + d + '</div></div><button type="button" class="btn btn-outline btn-sm" data-act="finExport" data-k="' + k + '">Gerar</button></div>'; };
+  return finPeriodBar(r) + '<div class="finsplit"><div class="col" style="gap:14px"><div class="card" style="padding:8px 16px"><div class="bold" style="font-size:15px;min-height:44px;display:flex;align-items:center">Planilhas (CSV)</div>' +
+    btn('extrato', 'Extrato do caixa', 'Todas as entradas e saídas do período, dia a dia: vendas, encomendas, gastos, contas pagas e outras entradas.') +
+    btn('categorias', 'Gastos por categoria', 'Total por categoria, % das saídas e variação contra o período anterior.') +
+    btn('mensal', 'Resumo mensal', 'Mês a mês: faturamento, recebido, custos fixos e variáveis, investimentos, retiradas e resultado.') +
+    btn('contas', 'Contas a pagar', 'Todas as contas lançadas, com situação, vencimento e valor pago (não depende do período).') + '</div></div>' +
+    '<div class="col" style="gap:14px"><div class="card" style="padding:8px 16px"><div class="bold" style="font-size:15px;min-height:44px;display:flex;align-items:center">Para ler, imprimir ou analisar</div>' +
+    '<div class="row between" style="min-height:68px;border-bottom:1px solid var(--line2);gap:12px;padding:8px 0"><div style="min-width:0"><div class="bold" style="font-size:14px;margin-bottom:2px">Relatório para imprimir ou salvar em PDF</div><div class="small muted" style="line-height:1.4">Resumo completo do período, em uma página limpa.</div></div><button type="button" class="btn btn-outline btn-sm" data-act="finPrint">Abrir</button></div>' +
+    btn('texto', 'Resumo em texto para análise', 'Números do período em texto, com perguntas prontas. Cole em uma IA (como o Claude) para tirar insights.') + '</div>' +
+    '<div class="note" style="line-height:1.5">Dica: gere o <b>Resumo mensal</b> e o <b>Extrato do caixa</b> e abra em uma planilha para fazer gráficos e tabelas dinâmicas. Os arquivos CSV abrem no Excel e no Google Planilhas, com vírgula decimal e ponto e vírgula como separador.</div></div></div>';
+}
+function viewFinanceiro() {
+  var bal = finBalance(today());
+  var tabs = [['geral', 'Visão geral'], ['lanc', 'Lançamentos'], ['contas', 'Contas a pagar'], ['prev', 'Previsão'], ['rel', 'Relatórios']];
+  var top = '<div class="topbar"><div><h1>Financeiro</h1><div class="sub">Caixa da empresa · ' + (bal === null ? 'informe o saldo para começar' : 'saldo hoje ' + money(bal)) + '</div></div>' +
+    '<button type="button" class="btn btn-ghost btn-sm" data-act="finBalOpen">' + (bal === null ? 'Informar saldo' : 'Ajustar saldo') + '</button></div>' +
+    '<div class="tabs" style="flex-wrap:wrap">' + tabs.map(function (x) { return '<button type="button" class="tab' + (ui.fTab === x[0] ? ' on' : '') + '" data-act="finTab" data-t="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
+  var body = ui.fTab === 'lanc' ? finTabLanc() : (ui.fTab === 'contas' ? finTabContas() : (ui.fTab === 'prev' ? finTabPrev() : (ui.fTab === 'rel' ? finTabRel() : finTabGeral())));
+  return top + '<div class="scroll" style="padding-top:14px">' + body + '</div>';
+}
+function viewFinPrint() {
+  var r = finRange(), pr = finPrevRange(r), f = finFlows(r.from, r.to), p = finFlows(pr.from, pr.to), bal = finBalance(today()), fc = finForecast(30), open = finBillsOpen();
+  var sum = function (l) { return l.reduce(function (a, b) { return a + b.cents; }, 0); };
+  var h = '<div class="topbar simple noprint"><button type="button" class="iconbtn" aria-label="Voltar" data-act="finTab" data-t="rel">' + ic('back', 24, 2.2) + '</button><h1 style="font-size:26px">Relatório financeiro</h1><button type="button" class="btn btn-primary btn-sm" style="margin-left:auto" data-act="finPrintNow">Imprimir ou salvar PDF</button></div>';
+  h += '<div class="scroll printable" style="padding-top:14px"><div><div class="bold" style="font-size:22px;font-family:Fraunces,Georgia,serif">Vora Cookies · Relatório financeiro</div><div class="small muted">Período: ' + esc(dmyFull(r.from)) + ' a ' + esc(dmyFull(r.to)) + ' · gerado em ' + esc(dmyFull(today())) + '</div></div>';
+  h += '<div class="fgrid">' + finKpi('Saldo em caixa', bal === null ? '—' : money(bal), '', '') + finKpi('Entradas', money(f.inTotal), deltaHtml(f.inTotal, p.inTotal, true), 'ok') + finKpi('Saídas', money(f.outTotal), deltaHtml(f.outTotal, p.outTotal, false), '') + finKpi('Variação do caixa', signed(f.net), deltaHtml(f.net, p.net, true), f.net < 0 ? 'warn' : 'ok') + '</div>';
+  h += finResultCard(f) + finCatCard(f, p) + finSourceCard(f) + finTopCard(f);
+  var months = finMonthKeys(r.from, r.to);
+  if (months.length > 1) {
+    h += '<div class="card"><div class="bold" style="font-size:15px;margin-bottom:6px">Mês a mês</div><div class="tbl h" style="grid-template-columns:minmax(0,1fr) repeat(4,minmax(0,1.1fr))"><span>Mês</span><span>Receita</span><span>Custos</span><span>Resultado</span><span>Caixa</span></div>' + months.map(function (m1) {
+      var mf = m1 < r.from ? r.from : m1, ml = addDays(addMonths(m1, 1), -1), mt = ml > r.to ? r.to : ml, x = finFlows(mf, mt);
+      return '<div class="tbl r" style="grid-template-columns:minmax(0,1fr) repeat(4,minmax(0,1.1fr));font-size:13px"><span>' + m1.slice(0, 7) + '</span><span>' + money(x.revenue) + '</span><span>' + money(x.costs) + '</span><b>' + signed(x.operating) + '</b><span>' + signed(x.net) + '</span></div>';
+    }).join('') + '</div>';
+  }
+  h += '<div class="card"><div class="bold" style="font-size:15px;margin-bottom:6px">Contas a pagar em aberto</div>' + fr('Total em aberto', money(sum(open)) + ' · ' + open.length + (open.length === 1 ? ' conta' : ' contas'), { bold: 1 }) +
+    fr('Atrasadas', money(sum(open.filter(function (b) { return b.date < today(); }))), {}) + fr('Vencem em 30 dias', money(sum(open.filter(function (b) { return b.date >= today() && b.date <= addDays(today(), 30); }))), {}) + '</div>';
+  if (fc) h += '<div class="card"><div class="bold" style="font-size:15px;margin-bottom:6px">Previsão dos próximos 30 dias</div>' + fr('Saldo esperado', signed(fc.exp[fc.days]), { bold: 1 }) + fr('Pior ponto esperado', signed(fc.minExp.v) + ' em ' + esc(dmyFull(fc.minExp.date)), {}) + fr('Cenário conservador (sem novas vendas)', signed(fc.cons[fc.days]), {}) + fr('Reserva mínima', money(fc.reserve), {}) + forecastSvg(fc) + '</div>';
+  return h + '</div>';
+}
+function finAjustesCard() {
+  var cats = finCats(true), kinds = Object.keys(KIND_NAMES);
+  return '<div class="card col"><div class="bold" style="font-size:14px">Financeiro · categorias de gastos</div>' +
+    '<div class="small muted" style="line-height:1.45">O tipo define como cada categoria entra nas contas: custo fixo e variável formam o resultado operacional; investimento e retirada ficam separados.</div>' +
+    cats.map(function (c) {
+      return '<div class="col" style="gap:6px;padding:8px 0;border-bottom:1px solid var(--line2)"><div class="row"><input class="box" style="min-height:44px;font-size:16px;flex:1;min-width:0" value="' + esc(c.name) + '" data-in="fcName" data-id="' + c.id + '" aria-label="Nome da categoria">' +
+        '<button type="button" class="btn btn-sm ' + (c.active !== false ? 'btn-green' : 'btn-ghost') + '" style="width:76px" data-act="fcToggle" data-id="' + c.id + '">' + (c.active !== false ? 'Ativa' : 'Inativa') + '</button></div>' +
+        '<select class="box" style="min-height:44px;font-size:14px" data-ch="fcKind" data-id="' + c.id + '" aria-label="Tipo da categoria">' + kinds.map(function (k) { return '<option value="' + k + '"' + (c.kind === k ? ' selected' : '') + '>' + KIND_NAMES[k] + '</option>'; }).join('') + '</select></div>';
+    }).join('') + '<button type="button" class="btn btn-ghost btn-block" data-act="fcAdd">+ Adicionar categoria</button></div>';
+}
+
+/* ---------- encomendas no caixa, no histórico e nos relatórios ---------- */
+var KIND_LABEL = { sinal: 'Sinal 50%', saldo: 'Saldo', total: 'Pagamento total' };
+function payDay(p) { return String(p.at || '').slice(0, 10); }
+function orderCashOn(d) {
+  var r = { n: 0, cents: 0, byMethod: {}, list: [] };
+  db.orders.forEach(function (o) {
+    (o.payments || []).forEach(function (p) {
+      if (payDay(p) === d) { r.n++; r.cents += p.cents; r.byMethod[p.method] = (r.byMethod[p.method] || 0) + p.cents; r.list.push({ o: o, p: p }); }
+    });
+  });
+  r.list.sort(function (x, y) { return String(x.p.at) < String(y.p.at) ? -1 : 1; });
+  return r;
+}
+function ordersDeliveredOn(d) { return db.orders.filter(function (o) { return o.delivered && o.deliveredDate === d; }); }
+function ordersDueOn(d) { return db.orders.filter(function (o) { return !o.delivered && o.deliveryDate === d; }); }
+function orderPacks(o) { return (o.lines || []).reduce(function (a, l) { return a + l.qty; }, 0); }
+function orderCookies(o) { return (o.lines || []).reduce(function (a, l) { return a + l.qty * l.size; }, 0); }
+/* dinheiro que entrou no dia: vendas de cookies pagas + pagamentos (sinal/saldo) de encomendas */
+function cashOn(d) {
+  var s = stats(d), oc = orderCashOn(d), bm = {}, k;
+  for (k in s.byMethod) bm[k] = (bm[k] || 0) + s.byMethod[k];
+  for (k in oc.byMethod) bm[k] = (bm[k] || 0) + oc.byMethod[k];
+  return { cents: s.paidC + oc.cents, salesC: s.paidC, ordC: oc.cents, ordN: oc.n, byMethod: bm };
+}
+function encDayCard(d, title) {
+  var oc = orderCashOn(d), dlv = ordersDeliveredOn(d), due = ordersDueOn(d), t = today(), isT = d === t;
+  var late = isT ? db.orders.filter(function (o) { return !o.delivered && o.deliveryDate && o.deliveryDate < t; }) : [];
+  if (!oc.n && !dlv.length && !due.length && !late.length) return '';
+  var line = function (o, txt) { return '<div class="row between small" style="min-height:34px;gap:10px"><span>' + esc(custName(o)) + '</span><span class="muted" style="text-align:right">' + txt + '</span></div>'; };
+  var rest = function (o) { var r = orderRemaining(o); return r > 0 ? 'falta ' + money(r) : 'pago'; };
+  var h = '<div class="card"><div class="bold" style="font-size:14px;margin-bottom:6px">' + title + '</div>' +
+    '<div class="row between bold" style="min-height:40px;border-bottom:1px solid var(--line2)"><span>Recebido de encomendas</span><span style="color:var(--green)">' + money(oc.cents) + '</span></div>';
+  h += oc.list.map(function (x) {
+    return '<div class="row between small" style="min-height:34px;gap:10px"><span>' + esc(custName(x.o)) + ' · ' + (KIND_LABEL[x.p.kind] || 'Pagamento') + ' · ' + esc(x.p.method) + '</span><b>' + money(x.p.cents) + '</b></div>';
+  }).join('');
+  if (dlv.length) h += '<div class="label" style="margin:10px 0 2px">Entregues ' + (isT ? 'hoje' : 'neste dia') + ' · ' + dlv.length + '</div>' + dlv.map(function (o) { return line(o, money(orderTotal(o)) + ' · ' + rest(o)); }).join('');
+  if (due.length) h += '<div class="label" style="margin:10px 0 2px">' + (isT ? 'Para entregar hoje' : 'Eram para entregar neste dia') + ' · ' + due.length + '</div>' + due.map(function (o) { return line(o, money(orderTotal(o)) + ' · ' + rest(o)); }).join('');
+  if (late.length) h += '<div class="label" style="margin:10px 0 2px;color:var(--warn-ink)">Atrasadas · ' + late.length + '</div>' + late.map(function (o) { return line(o, esc(dmyFull(o.deliveryDate)) + ' · ' + rest(o)); }).join('');
+  return h + '</div>';
+}
+function reportOrders(r, set) {
+  var o = { delN: 0, delC: 0, delRem: 0, delPacks: 0, delCookies: 0, openN: 0, openC: 0, openRem: 0, cash: 0, ordCash: 0, ordPays: 0, rows: [] }, per = {}, dayOnly = set;
+  if (ui.rDay) { dayOnly = {}; dayOnly[ui.rDay] = 1; }
+  db.orders.forEach(function (x) {
+    if (x.delivered && set[x.deliveredDate]) { o.delN++; o.delC += orderTotal(x); o.delRem += orderRemaining(x); o.delPacks += orderPacks(x); o.delCookies += orderCookies(x); }
+    if (!x.delivered) { o.openN++; o.openC += orderTotal(x); o.openRem += orderRemaining(x); }
+    if (x.delivered && dayOnly[x.deliveredDate]) (x.lines || []).forEach(function (l) { var p = per[l.fid] || (per[l.fid] = { name: l.name, packs: 0, cookies: 0 }); p.packs += l.qty; p.cookies += l.qty * l.size; });
+  });
+  r.days.forEach(function (d) { var c = cashOn(d); o.cash += c.cents; o.ordCash += c.ordC; o.ordPays += c.ordN; });
+  o.rows = Object.keys(per).map(function (k) { return per[k]; }).sort(function (a, b) { return b.packs - a.packs; });
+  return o;
+}
+function ordRepCard(o) {
+  var h = '<div class="card"><div class="bold" style="font-size:14px">Encomendas (congelados)</div>';
+  if (!(o.delN || o.openN || o.ordPays)) return h + '<div class="empty" style="padding:10px 0">Nenhuma encomenda entregue ou recebida neste período.</div></div>';
+  h += '<div class="grid2" style="gap:8px;margin-top:10px"><div class="mini"><div class="t">Entregues</div><div class="v" style="font-size:22px">' + o.delN + '</div><div class="small muted">' + money(o.delC) + '</div></div>' +
+    '<div class="mini warn"><div class="t">Em aberto agora</div><div class="v" style="font-size:22px">' + o.openN + '</div><div class="small muted">' + money(o.openC) + (o.openN ? ' · falta receber ' + money(o.openRem) : '') + '</div></div></div>' +
+    '<div class="row between" style="min-height:44px;margin-top:6px;border-bottom:1px solid var(--line2)"><span class="small bold muted">Sinais e saldos recebidos</span><b style="color:var(--green)">' + money(o.ordCash) + '</b></div>';
+  if (o.rows.length) {
+    var top = o.rows[0].packs || 1;
+    h += '<div class="label" style="margin-top:12px">Pacotes entregues por sabor' + (ui.rDay ? ' · ' + esc(shortDay(ui.rDay)) : '') + '</div><div class="small muted" style="margin:-2px 0 8px">' + o.delPacks + (o.delPacks === 1 ? ' pacote' : ' pacotes') + ' · ' + o.delCookies + ' cookies no período</div>' +
+      '<div class="col" style="gap:12px">' + o.rows.map(function (x) {
+        return '<div><div class="row between" style="align-items:baseline;font-size:13px"><span class="bold" style="font-weight:600">' + esc(x.name) + '</span><span class="small muted"><b style="font-size:15px;color:var(--ink)">' + x.packs + '</b> ' + (x.packs === 1 ? 'pacote' : 'pacotes') + ' · ' + x.cookies + ' cookies</span></div>' +
+          '<div class="bar"><i style="width:' + Math.round(x.packs / top * 100) + '%"></i></div></div>';
+      }).join('') + '</div>';
+  }
+  return h + '</div>';
+}
+
+/* ---------- ENCOMENDAS ---------- */
+function orderPill(o) {
+  var st = orderPayState(o);
+  if (st === 'total') return '<span class="chip chip-ok">Pago</span>';
+  if (st === 'parcial') return '<span class="chip chip-warn">Sinal pago</span>';
+  return '<span class="chip chip-warn">Aguardando sinal</span>';
+}
+function orderCard(o) {
+  var total = orderTotal(o), paid = orderPaid(o), rem = orderRemaining(o), ph = custPhone(o), rel = relDay(o.deliveryDate);
+  var late = !o.delivered && o.deliveryDate && o.deliveryDate < today();
+  var when = 'Entrega ' + esc(dmyFull(o.deliveryDate)) + (o.deliveryDate ? ' (' + WD3[pdate(o.deliveryDate).getDay()].toLowerCase() + ')' : '') +
+    (rel && !o.delivered ? ' · <b style="color:' + (late ? 'var(--warn-ink)' : 'var(--ink)') + '">' + esc(rel) + '</b>' : '');
+  var mode = o.delivery ? 'Entrega no endereço' + (o.feeCents > 0 ? ' · taxa ' + money(o.feeCents) : ' · taxa a confirmar') : 'Retirada';
+  var links = '<button type="button" class="linkbtn" data-act="encEdit" data-id="' + o.id + '">Editar</button>' +
+    (!o.delivered && paid === 0 && ph ? '<a class="linkbtn" href="' + esc(waLink(ph, encText(o))) + '" target="_blank" rel="noopener" data-act="eSent" data-id="' + o.id + '">' + (o.reqAt ? 'Reenviar pedido' : 'Pedir sinal') + '</a>' : '') +
+    (rem > 0 ? '<button type="button" class="linkbtn" data-act="eQr" data-id="' + o.id + '">QR Pix</button>' : '') +
+    (paid > 0 ? '<button type="button" class="linkbtn warn" data-act="eUnpayAsk" data-id="' + o.id + '">Desfazer pagamento</button>' : '') +
+    (o.delivered ? '<button type="button" class="linkbtn warn" data-act="eUndeliverAsk" data-id="' + o.id + '">Desfazer entrega</button>' : '');
+  var main = '';
+  if (rem > 0) main += '<button type="button" class="btn btn-green btn-sm" data-act="ePayStart" data-id="' + o.id + '">Registrar pagamento</button>';
+  if (!o.delivered) main += '<button type="button" class="btn btn-primary btn-sm" data-act="eDeliverAsk" data-id="' + o.id + '">Marcar como entregue</button>';
+  return '<div class="scard' + (!o.delivered && orderPayState(o) !== 'total' ? ' pend' : '') + '">' +
+    '<div class="row between"><span class="sname">' + esc(custName(o)) + '</span><span class="smoney">' + money(total) + '</span></div>' +
+    '<div class="small muted" style="line-height:1.5">' + (o.lines || []).map(function (l) { return esc(lineText(l)); }).join('<br>') + '</div>' +
+    '<div class="small">' + when + '</div><div class="small muted">' + esc(mode) + '</div>' +
+    (o.notes ? '<div class="small muted" style="font-style:italic">“' + esc(o.notes) + '”</div>' : '') +
+    '<div class="row wrap" style="gap:6px">' + orderPill(o) + (o.delivered ? '<span class="chip chip-ok">Entregue ✓</span>' : '') + '</div>' +
+    (paid > 0 && rem > 0 ? '<div class="tiny bold" style="color:var(--warn-ink)">Recebido ' + money(paid) + ' · falta ' + money(rem) + '</div>' : '') +
+    (paid > 0 && rem === 0 ? '<div class="tiny bold" style="color:var(--green)">Recebido ' + money(paid) + '</div>' : '') +
+    (o.reqAt && paid === 0 && !o.delivered ? '<div class="tiny bold" style="color:var(--warn-ink)">Pedido enviado ao cliente às ' + esc(o.reqAt) + '</div>' : '') +
+    (main ? '<div class="row wrap" style="gap:8px">' + main + '</div>' : '') +
+    '<div class="row wrap" style="gap:0 2px;margin:-2px -8px -6px">' + links + '</div></div>';
+}
+function viewEncomendas() {
+  var list = db.orders.slice(), open = list.filter(function (o) { return !o.delivered; }), done = list.filter(function (o) { return o.delivered; });
+  var byDateAsc = function (a, b) { return (a.deliveryDate || '') < (b.deliveryDate || '') ? -1 : (a.deliveryDate || '') > (b.deliveryDate || '') ? 1 : 0; };
+  open.sort(byDateAsc); done.sort(function (a, b) { return byDateAsc(b, a); });
+  var f = ui.eFilter, shown = f === 'entregues' ? done : (f === 'todas' ? open.concat(done) : open);
+  var tabs = [['abertas', 'Abertas', open.length], ['entregues', 'Entregues', done.length], ['todas', 'Todas', list.length]];
+  var receber = open.reduce(function (a, o) { return a + orderRemaining(o); }, 0);
+  var top = '<div class="topbar"><div><h1>Encomendas</h1><div class="sub">Congelados · a receber nas abertas: ' + money(receber) + '</div></div>' +
+    '<button type="button" class="iconbtn solid" aria-label="Nova encomenda" data-act="encNew">' + ic('plus', 24, 2.4) + '</button></div>' +
+    '<div class="tabs">' + tabs.map(function (x) { return '<button type="button" class="tab' + (f === x[0] ? ' on' : '') + '" data-act="encFilter" data-f="' + x[0] + '">' + x[1] + ' · ' + x[2] + '</button>'; }).join('') + '</div>';
+  var body = shown.length ? '<div class="cards">' + shown.map(orderCard).join('') + '</div>'
+    : '<div class="empty">' + (list.length ? 'Nenhuma encomenda nesta aba.' : 'Nenhuma encomenda ainda.<br>Toque em + para registrar a primeira.') + '</div>';
+  return top + '<div class="scroll">' + body + '</div>';
+}
+function viewEncForm() {
+  var e = ui.enc, q = norm(e.query), cust = e.customerId ? customerById(e.customerId) : null, matches = [];
+  if (!cust && q.length) {
+    matches = db.customers.filter(function (c) {
+      var nm = norm(c.name);
+      return nm.indexOf(q) === 0 || nm.split(' ').some(function (w) { return w.indexOf(q) === 0; }) || nm.indexOf(' ' + q) >= 0;
+    }).sort(function (a, b) { return a.name.localeCompare(b.name, 'pt-BR'); }).slice(0, 5);
+  }
+  var draft = encDraft(e), itemsC = draft.lines.reduce(function (a, l) { return a + lineCents(l); }, 0), total = itemsC + draft.feeCents;
+  var nPacks = draft.lines.reduce(function (a, l) { return a + l.qty; }, 0);
+  var nameOk = !!(cust || e.query.trim()), phoneUse = cust ? (cust.phone || e.phone) : e.phone, phoneOk = digits(phoneUse).length >= 10;
+  var ready = nameOk && draft.lines.length > 0 && !!e.date, canSend = ready && phoneOk;
+
+  var cb = '<div><div class="label">Cliente</div>';
+  if (!cust) {
+    cb += '<div class="card col" style="padding:12px 14px"><label class="field"><span>Nome (digite para buscar)</span>' +
+      '<input class="inp" id="enome" type="text" autocomplete="off" value="' + esc(e.query) + '" data-in="encQuery"></label>';
+    if (matches.length) {
+      cb += '<div class="col" style="gap:6px"><div class="tiny bold muted">Clientes cadastrados</div>' + matches.map(function (c) {
+        return '<button type="button" class="sugg" data-act="encPick" data-cid="' + c.id + '"><span><b>' + esc(c.name) + '</b><span class="s">' + esc(c.phone || 'sem celular') + '</span></span></button>';
+      }).join('') + '</div>';
+    } else if (q.length >= 2) {
+      cb += '<div class="note">Nenhum cliente com esse nome. Ele será cadastrado ao salvar: informe o celular abaixo.</div>';
+    }
+    cb += '<label class="field"><span>Celular (WhatsApp)</span><input class="inp" id="ecel" type="tel" inputmode="tel" placeholder="(11) 90000-0000" value="' + esc(e.phone) + '" data-in="encPhone"></label></div>';
+  } else {
+    cb += '<div class="col"><div class="card row between" style="padding:12px 14px"><div><div class="bold" style="font-size:16px">' + esc(cust.name) + '</div>' +
+      '<div class="muted" style="font-size:13px">' + esc(cust.phone || 'sem celular cadastrado') + '</div></div>' +
+      '<button type="button" class="btn btn-ghost btn-sm" style="min-height:44px" data-act="encChange">Trocar</button></div>';
+    if (!cust.phone) cb += '<label class="field card" style="padding:10px 14px"><span>Adicionar celular (WhatsApp)</span><input class="inp" id="ecel" type="tel" inputmode="tel" placeholder="(11) 90000-0000" value="' + esc(e.phone) + '" data-in="encPhone"></label>';
+    cb += '</div>';
+  }
+  cb += '</div>';
+
+  var flist = (db.settings.frozen || []).filter(function (f) { return f.active !== false || PACK_SIZES.some(function (sz) { return (e.items[f.id + '|' + sz] || 0) > 0; }); });
+  var fb = '<div><div class="label">Pacotes · cada pacote tem um único sabor</div><div class="col" style="gap:10px">' + (flist.length ? flist.map(function (f) {
+    return '<div class="card" style="padding:12px"><div class="bold" style="font-size:15px;margin-bottom:8px">' + esc(f.name) + '</div><div class="grid3" style="gap:8px">' + PACK_SIZES.map(function (sz) {
+      var k = f.id + '|' + sz, qn = e.items[k] || 0, price = (e.units && e.units[k]) || packPrice(f, sz);
+      return '<div style="text-align:center"><div class="tiny bold muted">' + sz + ' un</div><div class="small bold" style="margin-bottom:6px">' + money(price) + '</div>' +
+        '<div class="step sm" style="justify-content:center"><button type="button" aria-label="Diminuir ' + esc(f.name) + ' ' + sz + ' un" data-act="encDec" data-id="' + f.id + '" data-sz="' + sz + '"' + (qn <= 0 ? ' disabled' : '') + '>−</button>' +
+        '<div class="q' + (qn > 0 ? ' on' : '') + '">' + qn + '</div>' +
+        '<button type="button" class="plus" aria-label="Aumentar ' + esc(f.name) + ' ' + sz + ' un" data-act="encInc" data-id="' + f.id + '" data-sz="' + sz + '">+</button></div></div>';
+    }).join('') + '</div></div>';
+  }).join('') : '<div class="empty">Nenhum sabor ativo. Cadastre em Ajustes.</div>') + '</div></div>';
+
+  var eb = '<div><div class="label">Entrega</div><div class="card col" style="padding:12px 14px">' +
+    '<label class="field"><span>Data de entrega</span><input class="box" id="edate" type="date" value="' + esc(e.date) + '" data-ch="encDate"></label>' +
+    '<label class="check"><input type="checkbox" data-act="encDelivery"' + (e.delivery ? ' checked' : '') + '>Precisa de entrega no endereço</label>' +
+    (e.delivery ? '<label class="field"><span>Valor da entrega (R$) · deixe vazio para confirmar com o cliente</span><input class="inp" id="efee" type="text" inputmode="decimal" placeholder="15,00" value="' + esc(e.fee) + '" data-in="encFee"></label>' : '') +
+    '<label class="field"><span>Observações (opcional)</span><input class="inp" id="enotes" type="text" value="' + esc(e.notes) + '" data-in="encNotes"></label></div></div>';
+
+  var hint = !nameOk ? 'Informe o cliente' : (!draft.lines.length ? 'Escolha ao menos 1 pacote' : (!e.date ? 'Informe a data de entrega' : (!phoneOk ? 'Informe o celular para enviar o pedido' : '')));
+  var foot = '<div class="footer" style="flex-wrap:wrap"><div style="min-width:130px"><div class="small bold muted">' + nPacks + (nPacks === 1 ? ' pacote' : ' pacotes') + '</div>' +
+    '<div class="num" style="font-size:28px;line-height:1.1">' + money(total) + '</div><div class="tiny muted">Sinal de 50%: ' + money(sinalOf(total)) + '</div>' +
+    (hint ? '<div class="tiny bold" style="color:var(--warn-ink)">' + hint + '</div>' : '') + '</div>' +
+    '<div class="row" style="flex:1 1 230px;justify-content:flex-end"><button type="button" class="btn ' + (canSend ? 'btn-outline' : 'btn-primary') + ' btn-lg" style="padding:0 20px" data-act="encSave"' + (ready ? '' : ' disabled') + '>' + (e.editId ? 'Salvar alterações' : 'Salvar encomenda') + '</button>' +
+    (canSend ? '<a class="btn btn-green btn-lg" style="padding:0 18px" href="' + esc(waLink(phoneUse, encText(draft))) + '" target="_blank" rel="noopener" data-act="encSend">Salvar e enviar pedido</a>' : '') + '</div></div>';
+  return topSimple(e.editId ? 'Editar encomenda' : 'Nova encomenda', 'encomendas') + '<div class="scroll"><div class="split nova"><div class="ar-a">' + cb + '</div><div class="ar-b">' + fb + '</div><div class="ar-c col" style="gap:18px">' + eb + '</div></div></div>' + foot;
+}
+function encAjustesCard() {
+  var fz = db.settings.frozen || [];
+  return '<div class="card col"><div class="bold" style="font-size:14px">Encomendas (congelados)</div>' +
+    '<div class="small muted" style="line-height:1.45">Preço de cada pacote por sabor. Cada pacote tem um único sabor. Mudar um preço vale para as próximas encomendas.</div>' +
+    fz.map(function (f) {
+      return '<div class="col" style="gap:6px;padding:8px 0;border-bottom:1px solid var(--line2)"><div class="row"><input class="box" style="min-height:44px;font-size:16px;flex:1;min-width:0" value="' + esc(f.name) + '" data-in="fzName" data-id="' + f.id + '" aria-label="Nome do sabor congelado">' +
+        '<button type="button" class="btn btn-sm ' + (f.active !== false ? 'btn-green' : 'btn-ghost') + '" style="width:76px" data-act="fzToggle" data-id="' + f.id + '">' + (f.active !== false ? 'Ativo' : 'Inativo') + '</button></div>' +
+        '<div class="grid3" style="gap:8px">' + PACK_SIZES.map(function (sz) {
+          return '<label class="field"><span>Pacote ' + sz + ' un</span><input class="box" style="min-height:44px;font-size:16px;padding:0 10px" inputmode="decimal" value="' + fmtInput(packPrice(f, sz)) + '" data-in="fzPrice" data-id="' + f.id + '" data-sz="' + sz + '" aria-label="Preço do pacote de ' + sz + ' unidades de ' + esc(f.name) + '"></label>';
+        }).join('') + '</div></div>';
+    }).join('') +
+    '<button type="button" class="btn btn-ghost btn-block" data-act="fzAdd">+ Adicionar sabor congelado</button>' +
+    '<div class="bold" style="font-size:13px;margin-top:6px">Mensagem do pedido (confirmação e sinal)</div>' +
+    '<textarea class="box" id="enctpl" data-in="encTpl" style="min-height:240px;font-size:14px" aria-label="Mensagem da encomenda">' + esc(db.settings.encTemplate) + '</textarea>' +
+    '<div class="small muted" style="line-height:1.45">Use <b>{nome}</b>, <b>{itens}</b>, <b>{entrega}</b>, <b>{total}</b>, <b>{sinal}</b> (50%) e <b>{pix}</b>. O agradecimento depois da entrega usa a mesma mensagem de agradecimento dos cookies.</div></div>';
+}
+
+
 function build() {
   if (Auth.required && Auth.status !== 'in') return viewLogin();
   var v = ui.screen, html;
@@ -1142,13 +2021,18 @@ function build() {
   else if (v === 'historico') html = viewHistorico();
   else if (v === 'fechar') html = viewFechar();
   else if (v === 'clientes') html = viewClientes();
-  else if (v === 'relatorios') html = viewRelatorios();
+  else if (v === 'relatorios') html = isPhone() ? viewSoComputador() : viewRelatorios();
+  else if (v === 'financeiro') html = isPhone() ? viewSoComputador('Financeiro') : viewFinanceiro();
+  else if (v === 'finprint') html = isPhone() ? viewSoComputador('Financeiro') : viewFinPrint();
   else if (v === 'ajustes') html = viewAjustes();
   else if (v === 'conferir') html = viewConferir();
+  else if (v === 'encomendas') html = viewEncomendas();
+  else if (v === 'encform') html = viewEncForm();
   else html = viewHoje();
-  var noNav = (v === 'nova' || v === 'fechar' || v === 'ajustes' || v === 'conferir');
+  var noNav = (v === 'nova' || v === 'fechar' || v === 'ajustes' || v === 'conferir' || v === 'encform' || v === 'finprint');
   var toast = ui.toast ? '<div class="toast' + (noNav ? ' noNav' : '') + '" role="status">' + ui.toast.html + '</div>' : '';
-  var main = '<div class="main' + (noNav ? ' solo' : '') + '">' + html + '</div>';
+  var banner = (typeof window !== 'undefined' && window.__VORA_PREVIEW) ? '<div class="preview-banner">Prévia com dados de exemplo · nada aqui é enviado nem salvo na nuvem</div>' : '';
+  var main = '<div class="main' + (noNav ? ' solo' : '') + '">' + banner + html + '</div>';
   return main + (noNav ? '' : navHtml()) + sheetHtml() + toast;
 }
 
@@ -1226,7 +2110,9 @@ function attr(el, n) { return el.getAttribute('data-' + n); }
 /* ---- navegação ---- */
 a.go = function (el) {
   var s = attr(el, 'screen');
+  if (PC_ONLY[s] && isPhone()) { toast('Essa área abre só no computador ou no tablet.'); return; }
   if (ui.screen === 'nova' && s !== 'nova') ui.nova = freshNova();
+  if (ui.screen === 'encform' && s !== 'encform') ui.enc = freshEnc();
   if (s === 'vendas') ui.vFilter = 'todas';
   if (s === 'ajustes') { ui.backup = ''; }
   if (s !== 'clientes') ui.cliFocus = null;
@@ -1416,12 +2302,18 @@ a.fecharReopen = function () {
 /* ---- clientes e WhatsApp ---- */
 a.thanked = function (el) {
   var ids = String(attr(el, 'id') || '').split(',');
-  commitQuiet(function (d) { d.sales.forEach(function (s) { if (ids.indexOf(s.id) >= 0) { s.thank = 'sent'; s.thankAt = nowTime(); } }); });
+  commitQuiet(function (d) {
+    d.sales.forEach(function (s) { if (ids.indexOf(s.id) >= 0) { s.thank = 'sent'; s.thankAt = nowTime(); } });
+    d.orders.forEach(function (o) { if (ids.indexOf(o.id) >= 0) { o.thank = 'sent'; o.thankAt = nowTime(); } });
+  });
   setTimeout(function () { render(); }, 600);
 };
 a.thanksGo = function () {
   var sids = (ui.sheet && ui.sheet.sids) || [];
-  commitQuiet(function (d) { d.sales.forEach(function (s) { if (sids.indexOf(s.id) >= 0 && s.paid && s.thank !== 'sent') s.thank = 'pending'; }); });
+  commitQuiet(function (d) {
+    d.sales.forEach(function (s) { if (sids.indexOf(s.id) >= 0 && s.paid && s.thank !== 'sent') s.thank = 'pending'; });
+    d.orders.forEach(function (o) { if (sids.indexOf(o.id) >= 0 && o.delivered && o.thank !== 'sent') o.thank = 'pending'; });
+  });
   ui.cliFocus = sids; ui.cliQuery = ''; ui.sheet = null; ui.screen = 'clientes'; render();
 };
 a.cliOpen = function (el) {
@@ -1708,6 +2600,262 @@ a.conferirYes = function () {
 inp.pixKey = function (el) { var v = el.value.trim(); commitQuiet(function (d) { d.settings.pixKey = v; }); };
 inp.ordTpl = function (el) { var v = el.value; commitQuiet(function (d) { d.settings.orderTemplate = v; }); };
 
+/* ---- encomendas (congelados) ---- */
+a.encNew = function () { ui.enc = freshEnc(); ui.screen = 'encform'; ui.sheet = null; render(); };
+a.encEdit = function (el) {
+  var o = orderById(attr(el, 'id')); if (!o) return;
+  var e = freshEnc();
+  e.editId = o.id; e.customerId = o.customerId || null; e.query = o.name; e.delivery = !!o.delivery; e.fee = o.feeCents ? fmtInput(o.feeCents) : ''; e.date = o.deliveryDate || ''; e.notes = o.notes || '';
+  (o.lines || []).forEach(function (l) { var k = l.fid + '|' + l.size; e.items[k] = l.qty; e.units[k] = l.unit; e.names[k] = l.name; });
+  ui.enc = e; ui.screen = 'encform'; ui.sheet = null; render();
+};
+a.encFilter = function (el) { ui.eFilter = attr(el, 'f'); render(); };
+a.encPick = function (el) { var c = customerById(attr(el, 'cid')); if (!c) return; ui.enc.customerId = c.id; ui.enc.query = c.name; ui.enc.phone = ''; render(); };
+a.encChange = function () { var e = ui.enc; e.customerId = null; e.query = ''; e.phone = ''; render(); };
+a.encDelivery = function (el) { ui.enc.delivery = !!el.checked; if (!ui.enc.delivery) ui.enc.fee = ''; render(); };
+a.encInc = function (el) { var k = attr(el, 'id') + '|' + attr(el, 'sz'); ui.enc.items[k] = (ui.enc.items[k] || 0) + 1; render(); };
+a.encDec = function (el) { var k = attr(el, 'id') + '|' + attr(el, 'sz'); ui.enc.items[k] = Math.max(0, (ui.enc.items[k] || 0) - 1); render(); };
+inp.encQuery = function (el) { ui.enc.query = el.value; ui.enc.customerId = null; render(); };
+inp.encPhone = function (el) { ui.enc.phone = el.value; };
+inp.encFee = function (el) { ui.enc.fee = el.value; render(); };
+inp.encNotes = function (el) { ui.enc.notes = el.value; };
+chg.encDate = function (el) { ui.enc.date = el.value; render(); };
+a.encSave = function (el, ev, send) {
+  if (!canWrite()) { blocked(); return; }
+  var e = ui.enc, t = today(), cust = e.customerId ? customerById(e.customerId) : null, name = cust ? cust.name : e.query.trim();
+  var lines = encLines(e);
+  if (!name || !lines.length || !e.date) return;
+  var phone = e.phone.trim() ? fmtPhone(e.phone.trim()) : '', fee = e.delivery ? parseMoney(e.fee) : 0, saved = null, wasEdit = !!e.editId;
+  commitQuiet(function (d) {
+    if (!cust) {
+      var ex = d.customers.filter(function (c) { return norm(c.name) === norm(name); })[0];
+      if (ex) cust = ex; else { cust = { id: uid(), name: name, phone: phone }; d.customers.push(cust); }
+    }
+    if (phone && !cust.phone) cust.phone = phone;
+    if (e.editId) {
+      d.orders.forEach(function (o) {
+        if (o.id === e.editId) { o.customerId = cust.id; o.name = cust.name; o.lines = lines; o.delivery = !!e.delivery; o.feeCents = fee; o.deliveryDate = e.date; o.notes = e.notes.trim(); saved = o; }
+      });
+    } else {
+      saved = { id: uid(), customerId: cust.id, name: cust.name, date: t, time: nowTime(), createdAt: t + ' ' + nowTime(), deliveryDate: e.date, delivery: !!e.delivery, feeCents: fee, lines: lines, notes: e.notes.trim(), payments: [], delivered: false, thank: null };
+      d.orders.push(saved);
+    }
+    if (send && saved) saved.reqAt = nowTime();
+  });
+  var total = saved ? orderTotal(saved) : 0;
+  ui.enc = freshEnc(); ui.screen = 'encomendas'; ui.eFilter = 'abertas'; ui.sheet = null;
+  toast((wasEdit ? 'Encomenda atualizada' : 'Encomenda salva') + ' · ' + money(total) + (send ? ' · pedido aberto no WhatsApp (toque em Enviar)' : ''));
+  render();
+};
+a.encSend = function (el, ev) {
+  if (!canWrite()) { ev.preventDefault(); blocked(); return; }
+  setTimeout(function () { a.encSave(null, null, true); }, 80);
+};
+a.eSent = function (el) {
+  var id = attr(el, 'id');
+  if (!canWrite()) return;
+  commitQuiet(function (d) { d.orders.forEach(function (o) { if (o.id === id) o.reqAt = nowTime(); }); });
+  setTimeout(function () { render(); }, 600);
+};
+a.ePayStart = function (el) { var o = orderById(attr(el, 'id')); if (!o) return; ui.sheet = { type: 'epay1', oid: o.id, kind: orderPaid(o) === 0 ? 'sinal' : 'saldo', method: 'Pix' }; render(); };
+a.ePayKind = function (el) { ui.sheet.kind = attr(el, 'k'); render(); };
+a.ePayNext = function () { ui.sheet.type = 'epay2'; render(); };
+a.ePayBack = function () { ui.sheet.type = 'epay1'; render(); };
+a.ePayConfirm = function () {
+  var sh = ui.sheet, o = orderById(sh.oid);
+  if (!o) { ui.sheet = null; render(); return; }
+  var cents = epayAmount(o, sh.kind), method = sh.method, kind = sh.kind, oid = o.id;
+  ui.sheet = null;
+  if (!(cents > 0)) { render(); return; }
+  var ok = commit(function (d) { d.orders.forEach(function (x) { if (x.id === oid) { x.payments = x.payments || []; x.payments.push({ at: today() + ' ' + nowTime(), cents: cents, method: method, kind: kind }); } }); });
+  if (!ok) return;
+  var ox = orderById(oid);
+  toast('Pagamento registrado: ' + money(cents) + (orderPayState(ox) === 'total' ? ' · encomenda paga' : ' · falta ' + money(orderRemaining(ox))));
+};
+a.eUnpayAsk = function (el) {
+  var o = orderById(attr(el, 'id'));
+  if (!o || !(o.payments || []).length) return;
+  var p = o.payments[o.payments.length - 1];
+  ui.sheet = { type: 'confirm', title: 'Remover o último pagamento?', text: 'Vai remover o pagamento de ' + money(p.cents) + ' (' + p.method + ') da encomenda de ' + o.name + '.', label: 'Sim, remover', yes: 'eUnpayYes', oid: o.id }; render();
+};
+a.eUnpayYes = function () {
+  var oid = ui.sheet.oid; ui.sheet = null;
+  if (commit(function (d) { d.orders.forEach(function (x) { if (x.id === oid && x.payments && x.payments.length) x.payments.pop(); }); })) toast('Pagamento removido.');
+};
+a.eDeliverAsk = function (el) {
+  var o = orderById(attr(el, 'id')); if (!o) return;
+  var rem = orderRemaining(o);
+  ui.sheet = { type: 'confirm', title: 'Marcar como entregue?', text: 'Encomenda de ' + o.name + ' (' + money(orderTotal(o)) + ').' + (rem > 0 ? ' Ainda falta receber ' + money(rem) + '.' : ''), label: 'Sim, entregue', yes: 'eDeliverYes', oid: o.id }; render();
+};
+a.eDeliverYes = function () {
+  var oid = ui.sheet.oid; ui.sheet = null;
+  var ok = commit(function (d) {
+    d.orders.forEach(function (x) { if (x.id === oid) { x.delivered = true; x.deliveredDate = today(); x.deliveredTime = nowTime(); if (x.thank !== 'sent') x.thank = custPhone(x) ? 'pending' : null; } });
+  });
+  if (!ok) return;
+  var ox = orderById(oid);
+  if (ox && custPhone(ox) && ox.thank === 'pending') { ui.sheet = { type: 'thanks', sids: [oid], head: 'Encomenda entregue ✓' }; render(); }
+  else toast('Encomenda marcada como entregue.');
+};
+a.eUndeliverAsk = function (el) {
+  var o = orderById(attr(el, 'id')); if (!o) return;
+  ui.sheet = { type: 'confirm', title: 'Desfazer a entrega?', text: 'A encomenda de ' + o.name + ' volta para a lista de abertas.', label: 'Sim, desfazer', yes: 'eUndeliverYes', oid: o.id }; render();
+};
+a.eUndeliverYes = function () {
+  var oid = ui.sheet.oid; ui.sheet = null;
+  if (commit(function (d) { d.orders.forEach(function (x) { if (x.id === oid) { x.delivered = false; delete x.deliveredDate; delete x.deliveredTime; if (x.thank === 'pending') x.thank = null; } }); })) toast('Entrega desfeita.');
+};
+a.eQr = function (el) { ui.sheet = { type: 'eqr', oid: attr(el, 'id'), kind: null }; render(); };
+a.eQrKind = function (el) { ui.sheet.kind = attr(el, 'k'); render(); };
+inp.fzName = function (el) { var id = attr(el, 'id'), v = el.value.trim(); if (!v) return; commitQuiet(function (d) { (d.settings.frozen || []).forEach(function (f) { if (f.id === id) f.name = v; }); }); };
+inp.fzPrice = function (el) { var id = attr(el, 'id'), sz = attr(el, 'sz'), c = parseMoney(el.value); commitQuiet(function (d) { (d.settings.frozen || []).forEach(function (f) { if (f.id === id) { f.pack = f.pack || {}; f.pack[sz] = c; } }); }); };
+a.fzToggle = function (el) { var id = attr(el, 'id'); commit(function (d) { (d.settings.frozen || []).forEach(function (f) { if (f.id === id) f.active = (f.active === false); }); }); };
+a.fzAdd = function () { commit(function (d) { d.settings.frozen = d.settings.frozen || []; d.settings.frozen.push({ id: 'f-' + uid(), name: 'Novo sabor', resale: 0, pack: { 6: 0, 12: 0, 24: 0 }, active: true }); }); };
+inp.encTpl = function (el) { var v = el.value; commitQuiet(function (d) { d.settings.encTemplate = v; }); };
+
+
+/* ---- financeiro ---- */
+function finById(id) { for (var i = 0; i < db.fin.length; i++) if (db.fin[i].id === id) return db.fin[i]; return null; }
+function finCfgOf(d) { if (!d.settings.finCfg || !Array.isArray(d.settings.finCfg.cats)) d.settings.finCfg = JSON.parse(JSON.stringify(FIN_DEFAULT)); return d.settings.finCfg; }
+function freshFF(kind) { return { kind: kind, id: null, desc: '', cat: kind === 'entrada' ? INC_CATS[0] : ((finCats(false)[0] || {}).id || ''), amount: '', date: kind === 'conta' ? '' : today(), supplier: '', method: 'Pix', notes: '', recur: '', err: '' }; }
+a.finTab = function (el) { ui.fTab = attr(el, 't'); if (ui.screen === 'finprint') ui.screen = 'financeiro'; render(); };
+a.finPeriod = function (el) { ui.fPeriod = attr(el, 'p'); render(); };
+chg.fFrom = function (el) { ui.fFrom = el.value; render(); };
+chg.fTo = function (el) { ui.fTo = el.value; render(); };
+chg.fCat = function (el) { ui.fCat = el.value; render(); };
+a.finHor = function (el) { ui.fHor = +attr(el, 'h'); render(); };
+inp.simAmount = function (el) { ui.fSim.amount = el.value; render(); };
+chg.simDate = function (el) { ui.fSim.date = el.value; render(); };
+a.finNew = function (el) { ui.ff = freshFF(attr(el, 'kind')); ui.sheet = { type: 'finform' }; render(); };
+a.finEdit = function (el) {
+  var e = finById(attr(el, 'id')); if (!e) return;
+  ui.ff = { kind: e.type === 'in' ? 'entrada' : e.origin, id: e.id, desc: e.desc, cat: e.cat, amount: fmtInput(e.cents), date: e.date, supplier: e.supplier || '', method: e.method || 'Pix', notes: e.notes || '', recur: e.recur || '', err: '' };
+  ui.sheet = { type: 'finform' }; render();
+};
+inp.ffDesc = function (el) { ui.ff.desc = el.value; };
+inp.ffAmount = function (el) { ui.ff.amount = el.value; };
+inp.ffSup = function (el) { ui.ff.supplier = el.value; };
+inp.ffNotes = function (el) { ui.ff.notes = el.value; };
+chg.ffCat = function (el) { ui.ff.cat = el.value; };
+chg.ffDate = function (el) { ui.ff.date = el.value; };
+chg.ffRecur = function (el) { ui.ff.recur = el.value; };
+a.ffMethod = function (el) { ui.ff.method = attr(el, 'm'); render(); };
+a.ffSave = function () {
+  if (!canWrite()) { blocked(); return; }
+  var f = ui.ff, cents = parseMoney(f.amount), desc = f.desc.trim(), saved = null;
+  if (!desc) f.err = 'Informe a descrição.';
+  else if (!(cents > 0)) f.err = 'Informe um valor maior que zero.';
+  else if (!validDate(f.date)) f.err = f.kind === 'conta' ? 'Informe a data de vencimento.' : 'Informe a data.';
+  else if (!f.cat) f.err = 'Escolha a categoria.';
+  else f.err = '';
+  if (f.err) { render(); return; }
+  commit(function (d) {
+    if (f.id) {
+      d.fin.forEach(function (e) {
+        if (e.id !== f.id) return;
+        e.desc = desc; e.cat = f.cat; e.cents = cents; e.date = f.date; e.supplier = f.supplier.trim(); e.notes = f.notes.trim();
+        if (f.kind === 'conta') e.recur = f.recur; else { e.method = f.method; if (e.type === 'out') { e.paidDate = f.date; e.paidCents = cents; } }
+        saved = e;
+      });
+      return;
+    }
+    var base = { id: uid(), desc: desc, cat: f.cat, cents: cents, date: f.date, supplier: f.supplier.trim(), method: f.method, notes: f.notes.trim(), createdAt: nowStamp() };
+    if (f.kind === 'entrada') Object.assign(base, { type: 'in', origin: 'entrada', paid: true, paidDate: f.date });
+    else if (f.kind === 'gasto') Object.assign(base, { type: 'out', origin: 'gasto', paid: true, paidDate: f.date, paidCents: cents });
+    else Object.assign(base, { type: 'out', origin: 'conta', paid: false, recur: f.recur });
+    d.fin.push(base); saved = base;
+  });
+  ui.sheet = null;
+  toast((f.id ? 'Lançamento atualizado' : (f.kind === 'conta' ? 'Conta cadastrada' : (f.kind === 'entrada' ? 'Entrada registrada' : 'Gasto registrado'))) + ' · ' + money(cents));
+  render();
+};
+a.ffDelAsk = function () { ui.sheet = { type: 'confirm', title: 'Excluir este lançamento?', text: 'Ele deixa de contar no caixa e nos relatórios. Essa ação não pode ser desfeita.', label: 'Sim, excluir', yes: 'ffDelYes', fid: ui.ff.id }; render(); };
+a.ffDelYes = function () {
+  var id = ui.sheet.fid; ui.sheet = null;
+  if (commit(function (d) { d.fin = d.fin.filter(function (e) { return e.id !== id; }); })) toast('Lançamento excluído.');
+};
+a.finPayOpen = function (el) { var b = finById(attr(el, 'id')); if (!b) return; ui.sheet = { type: 'finpay', id: b.id, amount: fmtInput(b.cents), date: today(), method: 'Pix', err: '' }; render(); };
+inp.fpAmount = function (el) { ui.sheet.amount = el.value; };
+chg.fpDate = function (el) { ui.sheet.date = el.value; };
+a.finPayConfirm = function () {
+  var sh = ui.sheet, b = finById(sh.id);
+  if (!b) { ui.sheet = null; render(); return; }
+  var cents = parseMoney(sh.amount), date = sh.date, method = sh.method, bid = b.id, nextDate = null;
+  if (!(cents > 0) || !validDate(date)) { sh.err = 'Informe o valor e a data do pagamento.'; render(); return; }
+  ui.sheet = null;
+  var ok = commit(function (d) {
+    d.fin.forEach(function (e) {
+      if (e.id !== bid) return;
+      e.paid = true; e.paidDate = date; e.paidCents = cents; e.paidMethod = method; e.paidAt = nowStamp();
+      if (e.recur === 'mensal') {
+        nextDate = addMonths(e.date, 1);
+        var nid = uid();
+        d.fin.push({ id: nid, type: 'out', origin: 'conta', desc: e.desc, cat: e.cat, cents: e.cents, date: nextDate, supplier: e.supplier || '', method: e.method || 'Pix', notes: e.notes || '', paid: false, recur: 'mensal', createdAt: nowStamp() });
+        e.nextId = nid;
+      }
+    });
+  });
+  if (ok) toast('Conta paga: ' + money(cents) + (nextDate ? ' · próxima criada para ' + dmyFull(nextDate) : ''));
+};
+a.finUnpayAsk = function (el) {
+  var e = finById(attr(el, 'id')); if (!e) return;
+  ui.sheet = { type: 'confirm', title: 'Desfazer o pagamento?', text: 'A conta "' + e.desc + '" volta para em aberto e o valor sai das saídas do caixa.' + (e.nextId ? ' A próxima conta criada automaticamente também será removida, se ainda não foi paga.' : ''), label: 'Sim, desfazer', yes: 'finUnpayYes', fid: e.id }; render();
+};
+a.finUnpayYes = function () {
+  var id = ui.sheet.fid; ui.sheet = null;
+  if (commit(function (d) {
+    var nid = null;
+    d.fin.forEach(function (e) { if (e.id === id) { e.paid = false; delete e.paidDate; delete e.paidCents; delete e.paidMethod; delete e.paidAt; nid = e.nextId || null; delete e.nextId; } });
+    if (nid) d.fin = d.fin.filter(function (e) { return !(e.id === nid && !e.paid); });
+  })) toast('Pagamento desfeito.');
+};
+a.finBalOpen = function () {
+  var c = finCfg(), bal = finBalance(today());
+  ui.sheet = { type: 'finbal', amount: bal === null ? '' : fmtInput(Math.abs(bal)).replace(/^/, bal < 0 ? '-' : ''), date: today(), reserve: c.reserve ? fmtInput(c.reserve) : '', err: '' }; render();
+};
+inp.fbAmount = function (el) { ui.sheet.amount = el.value; };
+chg.fbDate = function (el) { ui.sheet.date = el.value; };
+inp.fbReserve = function (el) { ui.sheet.reserve = el.value; };
+a.finBalSave = function () {
+  var sh = ui.sheet, raw = String(sh.amount || '').trim(), neg = /^-/.test(raw), v = parseMoney(raw.replace(/^-/, '')) * (neg ? -1 : 1), rs = parseMoney(sh.reserve), date = sh.date;
+  if (validDate(date) && date > today()) date = today();
+  if (!raw || !validDate(date)) { sh.err = 'Informe o saldo e a data.'; render(); return; }
+  ui.sheet = null;
+  if (commit(function (d) { var cfg = finCfgOf(d); cfg.startDate = date; cfg.startAt = date === today() ? nowStamp() : date + ' 23:59:59'; cfg.startCents = v; cfg.reserve = rs; })) toast('Saldo do caixa atualizado: ' + signed(v));
+};
+a.finExport = function (el) {
+  var k = attr(el, 'k'), r = finRange(), from = r.from, to = r.to, sfx = from + '_a_' + to, o = { title: '', hint: '', text: '', file: '', mime: 'text/csv;charset=utf-8' };
+  if (k === 'extrato') { o.title = 'Extrato do caixa'; o.hint = 'Todas as entradas e saídas de ' + dmyFull(from) + ' a ' + dmyFull(to) + '. Baixe o arquivo ou copie e cole em uma planilha.'; o.text = finExtratoCsv(from, to); o.file = 'extrato-caixa-' + sfx + '.csv'; }
+  else if (k === 'categorias') { o.title = 'Gastos por categoria'; o.hint = 'Período de ' + dmyFull(from) + ' a ' + dmyFull(to) + ', comparado ao período anterior de mesma duração.'; o.text = finCategoriasCsv(from, to); o.file = 'gastos-por-categoria-' + sfx + '.csv'; }
+  else if (k === 'mensal') { o.title = 'Resumo mensal'; o.hint = 'Mês a mês dentro do período escolhido.'; o.text = finMensalCsv(from, to); o.file = 'resumo-mensal-' + sfx + '.csv'; }
+  else if (k === 'contas') { o.title = 'Contas a pagar'; o.hint = 'Todas as contas lançadas, abertas e pagas.'; o.text = finContasCsv(); o.file = 'contas-a-pagar-' + today() + '.csv'; }
+  else { o.title = 'Resumo em texto para análise'; o.hint = 'Copie e cole em uma IA (como o Claude) para pedir insights, ou guarde como registro do período.'; o.text = finTextoResumo(from, to); o.file = 'resumo-financeiro-' + sfx + '.txt'; o.mime = 'text/plain;charset=utf-8'; }
+  o.type = 'finexp'; ui.sheet = o; render();
+};
+a.finDownload = function () {
+  var sh = ui.sheet; if (!sh || !sh.text) return;
+  try {
+    var blob = new Blob(['\ufeff' + sh.text], { type: sh.mime }), url = URL.createObjectURL(blob), l = document.createElement('a');
+    l.href = url; l.download = sh.file; document.body.appendChild(l); l.click(); document.body.removeChild(l);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+    toast('Arquivo gerado: ' + sh.file);
+  } catch (e) { toast('Não foi possível baixar daqui. Use "Copiar" e cole em uma planilha.'); }
+};
+a.finCopy = function () {
+  var sh = ui.sheet; if (!sh || !sh.text) return;
+  var done = function () { toast('Copiado. Cole na planilha ou na conversa.'); };
+  var fallback = function () { try { var ta = document.getElementById('exptext'); ta.focus(); ta.select(); document.execCommand('copy'); done(); } catch (e) { toast('Selecione o texto e copie com Ctrl+C.'); } };
+  try { if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(sh.text).then(done, fallback); return; } } catch (e) {}
+  fallback();
+};
+a.finPrint = function () { ui.screen = 'finprint'; ui.sheet = null; render(); };
+a.finPrintNow = function () { try { window.print(); } catch (e) {} };
+inp.fcName = function (el) { var id = attr(el, 'id'), v = el.value.trim(); if (!v) return; commitQuiet(function (d) { finCfgOf(d).cats.forEach(function (c) { if (c.id === id) c.name = v; }); }); };
+chg.fcKind = function (el) { var id = attr(el, 'id'), v = el.value; commit(function (d) { finCfgOf(d).cats.forEach(function (c) { if (c.id === id) c.kind = v; }); }); };
+a.fcToggle = function (el) { var id = attr(el, 'id'); commit(function (d) { finCfgOf(d).cats.forEach(function (c) { if (c.id === id) c.active = (c.active === false); }); }); };
+a.fcAdd = function () { commit(function (d) { finCfgOf(d).cats.push({ id: 'c-' + uid(), name: 'Nova categoria', kind: 'variavel', active: true }); }); };
+
+
 /* =========================================================
    NUVEM — banco online compartilhado (capability "db")
    Documentos: settings/main, customers/{id}, sales/{id}, days/{AAAA-MM-DD}
@@ -1724,6 +2872,8 @@ function desiredDocs(d) {
   out['settings/main'] = clone({ v: 1, flavors: d.flavors, settings: d.settings });
   d.customers.forEach(function (c) { out['customers/' + c.id] = clone(c); });
   d.sales.forEach(function (s) { out['sales/' + s.id] = clone(s); });
+  d.orders.forEach(function (o) { out['orders/' + o.id] = clone(o); });
+  d.fin.forEach(function (e) { out['fin/' + e.id] = clone(e); });
   Object.keys(d.days).forEach(function (k) {
     var day = d.days[k], has = false, p;
     if (day) { if (day.closed) has = true; if (day.produced) for (p in day.produced) if (day.produced[p] > 0) has = true; }
@@ -1737,7 +2887,7 @@ function effStr(p) {
   return Cloud.remoteStr[p] !== undefined ? Cloud.remoteStr[p] : null;
 }
 function composeFromRemote() {
-  var d = { v: 1, flavors: null, settings: null, customers: [], sales: [], days: {} }, paths = {};
+  var d = { v: 1, flavors: null, settings: null, customers: [], sales: [], orders: [], fin: [], days: {} }, paths = {};
   Object.keys(Cloud.remote).forEach(function (k) { paths[k] = 1; });
   Object.keys(Cloud.ops).forEach(function (k) { paths[k] = 1; });
   Object.keys(paths).forEach(function (p) {
@@ -1747,6 +2897,8 @@ function composeFromRemote() {
     if (p === 'settings/main') { d.flavors = data.flavors; d.settings = data.settings; }
     else if (p.indexOf('customers/') === 0) d.customers.push(data);
     else if (p.indexOf('sales/') === 0) d.sales.push(data);
+    else if (p.indexOf('orders/') === 0) d.orders.push(data);
+    else if (p.indexOf('fin/') === 0) d.fin.push(data);
     else if (p.indexOf('days/') === 0) d.days[p.slice(5)] = data;
   });
   var b = defaults();
@@ -1840,7 +2992,7 @@ function setNs(prefix, snap) {
 function onRemote(name) {
   Cloud.loaded[name] = true;
   if (!Cloud.ready) {
-    if (Cloud.loaded.settings && Cloud.loaded.customers && Cloud.loaded.sales && Cloud.loaded.days && (Cloud.serverSeen || Object.keys(Cloud.remote).length > 0)) onFirstLoad();
+    if (Cloud.loaded.settings && Cloud.loaded.customers && Cloud.loaded.sales && Cloud.loaded.orders && Cloud.loaded.fin && Cloud.loaded.days && (Cloud.serverSeen || Object.keys(Cloud.remote).length > 0)) onFirstLoad();
     return;
   }
   db = composeFromRemote(); Store.saveCloud(db); scheduleRender(); paintSync();
@@ -1858,7 +3010,7 @@ function subscribeAll() {
     else { delete Cloud.remote['settings/main']; delete Cloud.remoteStr['settings/main']; }
     onRemote('settings');
   }, onCloudError));
-  ['customers', 'sales', 'days'].forEach(function (name) {
+  ['customers', 'sales', 'orders', 'fin', 'days'].forEach(function (name) {
     Cloud.unsubs.push(api.collection(name).onSnapshot(function (snap) { if (snap.fromCache !== true) Cloud.serverSeen = true; setNs(name, snap); onRemote(name); }, onCloudError));
   });
 }
@@ -2032,10 +3184,11 @@ if (typeof window !== 'undefined' && window.__VORA_TEST) {
   window.__VORA_TEST.api = {
     build: build, ui: ui, a: a, inp: inp, chg: chg, render: render, freshNova: freshNova,
     getDb: function () { return db; }, setDb: function (d) { db = d; }, demoData: demoData, today: today, defaults: defaults,
-    qrSvg: qrSvg, pixPayloadFor: pixPayloadFor, pixPayloadOk: pixPayloadOk, parseBank: parseBank, matchEntries: matchEntries, Sample: Sample, runMatch: runMatch, addPixFromAi: addPixFromAi, Cloud: Cloud, Auth: Auth, startPlatform: startPlatform, cloudInit: cloudInit, cloudPush: cloudPush, stable: stable, legacyDiff: legacyDiff, composeFromRemote: composeFromRemote
+    qrSvg: qrSvg, pixPayloadFor: pixPayloadFor, pixPayloadOk: pixPayloadOk, parseBank: parseBank, matchEntries: matchEntries, Sample: Sample, runMatch: runMatch, addPixFromAi: addPixFromAi, Cloud: Cloud, Auth: Auth, isPhone: isPhone, finFlows: finFlows, finBalance: finBalance, finForecast: finForecast, finCanBuy: finCanBuy, finRange: finRange, finBillsOpen: finBillsOpen, addMonths: addMonths, daysBetween: daysBetween, finExtratoCsv: finExtratoCsv, finCategoriasCsv: finCategoriasCsv, finMensalCsv: finMensalCsv, finContasCsv: finContasCsv, finTextoResumo: finTextoResumo, finCatById: finCatById, cashOn: cashOn, addDays: addDays, orderTotal: orderTotal, cashOn: cashOn, addDays: addDays, encText: encText, FROZEN_DEFAULT: FROZEN_DEFAULT, startPlatform: startPlatform, cloudInit: cloudInit, cloudPush: cloudPush, stable: stable, legacyDiff: legacyDiff, composeFromRemote: composeFromRemote
   };
 }
 
 render();
 startPlatform();
 })();
+

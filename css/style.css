@@ -97,7 +97,7 @@ h1{font-size:28px;} h2{font-size:20px;}
 .sactions{min-height:40px;margin-top:2px;}
 .sect{font-size:13px;font-weight:700;color:var(--muted);padding-top:4px;}
 .empty{text-align:center;padding:26px 16px;color:var(--muted);font-size:13px;line-height:1.5;}
-.nav{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));height:72px;background:var(--card);border-top:1px solid var(--line);padding-top:8px;flex:none;}
+.nav{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));height:72px;background:var(--card);border-top:1px solid var(--line);padding-top:8px;flex:none;}
 .nav button{display:flex;flex-direction:column;align-items:center;gap:4px;border:0;background:transparent;font-size:11px;font-weight:600;color:var(--muted);}
 .nav button.on{color:var(--primary);font-weight:700;}
 :root[data-theme="dark"] .nav button.on{color:var(--accent);}
@@ -194,3 +194,28 @@ textarea.box{padding:12px 14px;min-height:110px;font-size:16px;font-weight:500;l
 .linkbtn:hover{background:var(--soft);}
 .linkbtn.warn{color:var(--warn-ink);}
 .crow.focus{border:2px solid var(--green-solid);}
+
+.step.sm{gap:2px;}
+.step.sm button{width:34px;height:40px;font-size:18px;border-radius:10px;}
+.step.sm .q{min-width:22px;font-size:18px;}
+.preview-banner{background:var(--warn-bg);color:var(--warn-deep);font-size:12px;font-weight:700;text-align:center;padding:6px 10px;flex:none;}
+@media (max-width:420px){.nav button{font-size:10px;}}
+
+
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;}
+.finsplit{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:16px;align-items:start;}
+@media (max-width:480px){.finsplit{grid-template-columns:minmax(0,1fr);}}
+.fsvg{width:100%;height:auto;display:block;}
+@page{size:A4;margin:14mm;}
+@media print{
+  .nav,.noprint,.toast,.overlay,.preview-banner{display:none!important;}
+  html,body,#app,.main,.scroll{background:#fff!important;}
+  html,body{height:auto!important;}
+  #app{display:block!important;max-width:none!important;border:0!important;height:auto!important;}
+  .main{display:block!important;height:auto!important;max-width:none!important;}
+  .scroll{overflow:visible!important;height:auto!important;display:block!important;padding:0!important;}
+  .scroll>*{margin-bottom:12px;}
+  .mini,.alert,.note{break-inside:avoid;}
+  .card{break-inside:auto;}
+  .fsvg{break-inside:avoid;}
+}

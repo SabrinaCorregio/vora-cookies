@@ -1,6 +1,6 @@
 // Service worker: deixa o app abrir sem internet e guarda uma cópia dos arquivos.
 // Sempre que publicar uma versão nova do app, troque o número abaixo (v1 -> v2...).
-const VERSAO = 'v1';
+const VERSAO = 'v2';
 const CACHE = 'vora-' + VERSAO;
 const ARQUIVOS = [
   './', './index.html', './manifest.webmanifest', './favicon.png',
